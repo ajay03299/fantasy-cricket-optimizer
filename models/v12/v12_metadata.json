@@ -1,0 +1,64 @@
+{
+  "best_weights": {
+    "global": 0.15,
+    "role": 0.25,
+    "comp": 0.15,
+    "quant": 0.15,
+    "stack": 0.3
+  },
+  "params_global": {
+    "n_estimators": 1096,
+    "learning_rate": 0.013902772316809309,
+    "max_depth": 5,
+    "subsample": 0.698707627016026,
+    "colsample_bytree": 0.6146773787137396,
+    "min_child_weight": 7,
+    "reg_alpha": 1.9761293027650566,
+    "reg_lambda": 2.3694175489378178,
+    "gamma": 0.8901171205921579
+  },
+  "metrics": [
+    {
+      "name": "Optuna global regression",
+      "mae": 20.635966736635716,
+      "spearman": 0.5157392599311021,
+      "top11": 0.6782897467828974,
+      "ndcg": 0.7976858128037135
+    },
+    {
+      "name": "Optuna role-specific",
+      "mae": 20.81200013076334,
+      "spearman": 0.5079193475578204,
+      "top11": 0.6749688667496886,
+      "ndcg": 0.7921875060916447
+    },
+    {
+      "name": "Optuna component (bat+bowl)",
+      "mae": 20.550220561059977,
+      "spearman": 0.5152099137556817,
+      "top11": 0.6724782067247822,
+      "ndcg": 0.7967908575629499
+    },
+    {
+      "name": "Optuna quantile",
+      "mae": 20.434804907481123,
+      "spearman": 0.5184754234249698,
+      "top11": 0.6791199667911998,
+      "ndcg": 0.7974899621641488
+    },
+    {
+      "name": "Stacking meta-learner",
+      "mae": 22.764277051792984,
+      "spearman": 0.44378568427290915,
+      "top11": 0.6488169364881694,
+      "ndcg": 0.7614873476256401
+    },
+    {
+      "name": "BEST v12 ENSEMBLE",
+      "mae": 20.814721080649587,
+      "spearman": 0.5087392693667687,
+      "top11": 0.6745537567455376,
+      "ndcg": 0.7942957321297099
+    }
+  ]
+}
