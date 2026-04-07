@@ -1,0 +1,5 @@
+venue_avg_total_runs_before           252.667
+venue_avg_powerplay_runs_before          92.0
+venue_avg_middle_overs_runs_before      103.0
+venue_avg_death_overs_runs_before      57.667
+Name: 1000, dtype: object
