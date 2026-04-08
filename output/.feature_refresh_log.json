@@ -1,0 +1,32 @@
+[
+  {
+    "timestamp": "2026-04-08T19:21:41.761727",
+    "trigger": "v10 feature table missing",
+    "steps": [
+      {
+        "name": "v8 build",
+        "rows": 25874,
+        "duplicates": 240,
+        "output": "output/model_feature_table_v8.csv"
+      },
+      {
+        "name": "v8 dedup",
+        "rows": 25634,
+        "duplicates": 0,
+        "output": "output/model_feature_table_v8.csv"
+      },
+      {
+        "name": "v9 build",
+        "rows": 25634,
+        "duplicates": 0,
+        "output": "output/model_feature_table_v9.csv"
+      },
+      {
+        "name": "v10 build",
+        "rows": 25634,
+        "duplicates": 0,
+        "output": "output/model_feature_table_v10.csv"
+      }
+    ]
+  }
+]
