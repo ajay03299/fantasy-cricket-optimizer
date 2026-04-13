@@ -7,5 +7,14 @@
     "decision": "dry_run",
     "backup_dir": "models/v11_backup_20260413_115325",
     "dry_run": true
+  },
+  {
+    "timestamp": "2026-04-13T11:58:09.076503",
+    "duration_seconds": 0.19369,
+    "old_metrics": null,
+    "new_metrics": null,
+    "decision": "dry_run",
+    "backup_dir": "models/v11_backup_20260413_115809",
+    "dry_run": true
   }
 ]
