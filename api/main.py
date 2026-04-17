@@ -31,8 +31,12 @@ bbb_matchups = None
 @app.on_event("startup")
 def load_data():
     global df, bbb_matchups
-    data_path = os.path.join(os.path.dirname(__file__), "..", "data", "v4_dataset.csv")
+    import glob
+    import re
+    
+    old_data_path = os.path.join(os.path.dirname(__file__), "..", "data", "v4_dataset.csv")
     bbb_path = os.path.join(os.path.dirname(__file__), "..", "Raw_Dataset", "all_ball_by_ball_data.csv")
+    output_dir = os.path.join(os.path.dirname(__file__), "..", "Fantasy-Cricket-Optimizer-phase9-production-pipeline", "output")
     
     if os.path.exists(bbb_path):
         bbb_df = pd.read_csv(bbb_path, usecols=['batter', 'bowler', 'batter_runs', 'is_wicket'], low_memory=False)
@@ -42,74 +46,122 @@ def load_data():
             wickets=('is_wicket', lambda x: x.astype(bool).sum())
         ).reset_index()
 
-    if os.path.exists(data_path):
-        # We read the dataset caching strictly the columns we need for perf if possible, 
-        # but loading all is fine for now on startup.
-        df = pd.read_csv(data_path, low_memory=False)
+    latest_hist = None
+    latest_pred = None
+    
+    if os.path.exists(output_dir):
+        hist_files = glob.glob(os.path.join(output_dir, "player_match_fantasy_v*.csv"))
+        pred_files = glob.glob(os.path.join(output_dir, "best_model_v*_predictions.csv"))
         
-        # 1. Standardizations
-        role_map = {"BAT": "BAT", "WKB": "WK", "BOWL": "BOWL", "AR": "AR", "WK": "WK"}
-        if 'player_role_platform' in df.columns:
-            df['Role'] = df['player_role_platform'].map(role_map).fillna("AR")
+        def get_version(f):
+            m = re.search(r'v(\d+)', os.path.basename(f))
+            return int(m.group(1)) if m else 0
+            
+        hist_files = [f for f in hist_files if 'with_opponent' not in f]
         
-        # 2. Ensure we have required metrics: proj_points and credits
-        if 'pred' in df.columns and 'proj_points' not in df.columns:
-            df['proj_points'] = df['pred']
-        elif 'total_fantasy_points' in df.columns and 'proj_points' not in df.columns:
-            df['proj_points'] = df['total_fantasy_points']
-        elif 'proj_points' not in df.columns:
-            # Deterministic fallback if not explicit
-            df['proj_points'] = df.index.map(lambda x: 20.0 + (x % 50))
-            
-        # 2. Credits should be based on player's overall historical stature, NOT tonight's prediction!
-        if 'credits' not in df.columns:
-            import math
-            career_scores = (df.groupby('player_name')['runs_scored'].mean().fillna(0) + df.groupby('player_name')['wickets'].mean().fillna(0) * 25)
-            counts = df.groupby('player_name').size()
-            career_scores = career_scores * counts.apply(lambda x: math.log1p(x))
-            
-            p98 = career_scores.quantile(0.98)
-            p94 = career_scores.quantile(0.94)
-            p85 = career_scores.quantile(0.85)
-            p70 = career_scores.quantile(0.70)
-            p50 = career_scores.quantile(0.50)
-            p30 = career_scores.quantile(0.30)
-            p15 = career_scores.quantile(0.15)
-            
-            def assign_dream11_credit_historic(p_name):
-                score = career_scores.get(p_name, 0)
-                if score >= p98: return 10.5
-                elif score >= p94: return 10.0
-                elif score >= p85: return 9.5
-                elif score >= p70: return 9.0
-                elif score >= p50: return 8.5
-                elif score >= p30: return 8.0
-                elif score >= p15: return 7.5
-                else: return 7.0
+        if hist_files:
+            latest_hist = max(hist_files, key=get_version)
+        if pred_files:
+            latest_pred = max(pred_files, key=get_version)
 
-            df['credits'] = df['player_name'].apply(assign_dream11_credit_historic)
+    if latest_hist and latest_pred:
+        df_hist = pd.read_csv(latest_hist, low_memory=False)
+        df_pred = pd.read_csv(latest_pred, low_memory=False)
+        
+        if 'pred' in df_hist.columns:
+            df_hist = df_hist.drop(columns=['pred'])
             
-        # 3. Create persistent ID
-        if 'id' not in df.columns:
-            df['id'] = df.index
+        df_pred_sub = df_pred[['match_id', 'player_name', 'pred']].drop_duplicates(subset=['match_id', 'player_name'])
+        df = pd.merge(df_hist, df_pred_sub, on=['match_id', 'player_name'], how='left')
+        
+        fp_col = next((c for c in df.columns if c.startswith('fantasy_points_v')), 'total_fantasy_points')
+        if fp_col in df.columns:
+            df['pred'] = df['pred'].fillna(df[fp_col])
+    elif os.path.exists(old_data_path):
+        df = pd.read_csv(old_data_path, low_memory=False)
+    else:
+        return
+        
+    # 1. Standardizations
+    role_map = {"BAT": "BAT", "WKB": "WK", "BOWL": "BOWL", "AR": "AR", "WK": "WK"}
+    if 'player_role_platform' in df.columns:
+        df['Role'] = df['player_role_platform'].map(role_map).fillna("AR")
+        
+    # 2. Ensure we have required metrics: proj_points and credits
+    if 'pred' in df.columns and 'proj_points' not in df.columns:
+        df['proj_points'] = df['pred']
+    elif 'total_fantasy_points' in df.columns and 'proj_points' not in df.columns:
+        df['proj_points'] = df['total_fantasy_points']
+    elif 'proj_points' not in df.columns:
+        # Deterministic fallback if not explicit
+        df['proj_points'] = df.index.map(lambda x: 20.0 + (x % 50))
+        
+    # 2. Credits should be based on player's overall historical stature, NOT tonight's prediction!
+    if 'credits' not in df.columns:
+        import math
+        career_scores = (df.groupby('player_name')['runs_scored'].mean().fillna(0) + df.groupby('player_name')['wickets'].mean().fillna(0) * 25)
+        counts = df.groupby('player_name').size()
+        career_scores = career_scores * counts.apply(lambda x: math.log1p(x))
+        
+        p98 = career_scores.quantile(0.98)
+        p94 = career_scores.quantile(0.94)
+        p85 = career_scores.quantile(0.85)
+        p70 = career_scores.quantile(0.70)
+        p50 = career_scores.quantile(0.50)
+        p30 = career_scores.quantile(0.30)
+        p15 = career_scores.quantile(0.15)
+        
+        def assign_dream11_credit_historic(p_name):
+            score = career_scores.get(p_name, 0)
+            if score >= p98: return 10.5
+            elif score >= p94: return 10.0
+            elif score >= p85: return 9.5
+            elif score >= p70: return 9.0
+            elif score >= p50: return 8.5
+            elif score >= p30: return 8.0
+            elif score >= p15: return 7.5
+            else: return 7.0
+
+        df['credits'] = df['player_name'].apply(assign_dream11_credit_historic)
+        
+    # 3. Create persistent ID
+    if 'id' not in df.columns:
+        df['id'] = df.index
 
 @app.get("/matches")
 def get_matches():
-    if df is None:
-        return []
-    
-    matches_meta = df.drop_duplicates(subset=['match_id']).copy()
-    
     res = []
-    # Return the last 20 unique matches for the UI Picker
-    for _, row in matches_meta.tail(20).iterrows():
-        res.append({
-            "match_id": str(row['match_id']),
-            "team1": str(row['team']),
-            "team2": str(row['opponent']),
-            "date": str(row.get('match_date', 'Unknown')),
-            "venue": str(row.get('venue', 'Unknown'))
-        })
+    
+    upcoming_path = os.path.join(os.path.dirname(__file__), "..", "data", "upcoming_matches.csv")
+    if os.path.exists(upcoming_path):
+        import csv
+        with open(upcoming_path, mode='r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                res.append({
+                    "match_id": str(row['match_id']),
+                    "team1": str(row['team1']),
+                    "team2": str(row['team2']),
+                    "date": str(row['date']),
+                    "venue": str(row['venue']),
+                    "status": str(row['status'])
+                })
+        # If we have the active 2026 schedule, return it reversed so latest are at top
+        res.reverse()
+        return res
+        
+    # Full fallback if 2026 tracking not running
+    if df is not None:
+        matches_meta = df.drop_duplicates(subset=['match_id']).copy()
+        for _, row in matches_meta.tail(20).iterrows():
+            res.append({
+                "match_id": str(row['match_id']),
+                "team1": str(row['team']),
+                "team2": str(row['opponent']),
+                "date": str(row.get('match_date', 'Unknown')),
+                "venue": str(row.get('venue', 'Unknown')),
+                "status": "completed"
+            })
     return res
 
 @app.get("/match_context/{match_id}")
@@ -134,18 +186,35 @@ def get_squad_data(match_id: str):
     if df is None:
         return pd.DataFrame()
     this_match = df[df['match_id'].astype(str) == str(match_id)]
-    if this_match.empty:
-        return pd.DataFrame()
-        
-    t1 = this_match['team'].iloc[0]
-    t2 = this_match['opponent'].iloc[0]
     
-    t1 = this_match['team'].iloc[0]
-    t2 = this_match['opponent'].iloc[0]
-    season = this_match['season'].iloc[0]
+    t1 = t2 = None
+    season = None
+    
+    if this_match.empty:
+        # Fallback for upcoming matches
+        upcoming_path = os.path.join(os.path.dirname(__file__), "..", "data", "upcoming_matches.csv")
+        if os.path.exists(upcoming_path):
+            import csv
+            with open(upcoming_path, mode='r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    if str(row['match_id']) == str(match_id):
+                        t1 = row['team1']
+                        t2 = row['team2']
+                        season = df['season'].max() if 'season' in df.columns else datetime.now().year
+                        break
+        if not t1:
+            return pd.DataFrame()
+    else:
+        t1 = this_match['team'].iloc[0]
+        t2 = this_match['opponent'].iloc[0]
+        season = this_match['season'].iloc[0]
     
     squad_data = df[(df['season'] == season) & (df['team'].isin([t1, t2]))]
-    
+    if squad_data.empty:
+        # Relax season constraint if not matching fully
+        squad_data = df[df['team'].isin([t1, t2])]
+        
     unique_players = squad_data.sort_values('match_date').drop_duplicates(subset=['player_name'], keep='last').copy()
     unique_players = unique_players[unique_players['team'].isin([t1, t2])]
     return unique_players
@@ -269,67 +338,6 @@ def get_matchup_stats(match_id: str, player_name: str):
         "micro_matchups": micro
     }
 
-def calculate_dream11_points(row):
-    points = 0
-    
-    # Batting
-    runs = int(row.get('runs_scored', 0))
-    fours = int(row.get('fours', 0))
-    sixes = int(row.get('sixes', 0))
-    
-    points += runs
-    points += fours * 1
-    points += sixes * 2
-    if runs >= 100: points += 16
-    elif runs >= 50: points += 8
-    elif runs >= 30: points += 4
-    
-    if int(row.get('is_duck', 0)) == 1 and str(row.get('Role', '')) in ['BAT', 'WK', 'AR']:
-        points -= 2
-        
-    # Bowling
-    wickets = int(row.get('wickets', 0))
-    lbw_bowled = int(row.get('bowled_wickets', 0)) + int(row.get('lbw_wickets', 0))
-    
-    points += wickets * 25
-    points += lbw_bowled * 8
-    if wickets >= 5: points += 16
-    elif wickets >= 4: points += 8
-    elif wickets >= 3: points += 4
-    
-    maiden = int(row.get('maidens', 0))
-    points += maiden * 12
-    
-    # Fielding
-    catches = int(row.get('catches', 0))
-    stumpings = int(row.get('stumpings', 0))
-    runouts = int(row.get('runout_direct', 0)) + int(row.get('runout_assist', 0))
-    
-    points += catches * 8
-    if catches >= 3: points += 4
-    points += stumpings * 12
-    points += runouts * 6
-    
-    return points
-
-@app.get("/backtest/{match_id}")
-def run_backtest(match_id: str):
-    if df is None:
-        return {"error": "Dataset not loaded"}
-        
-    match_data = df[df['match_id'].astype(str) == str(match_id)]
-    if match_data.empty:
-        return {"error": "Match not found"}
-        
-    scores = {}
-    for _, row in match_data.iterrows():
-        name = row['player_name']
-        scores[name] = calculate_dream11_points(row)
-        
-    return {
-        "status": "completed",
-        "real_scores": scores
-    }
 
 @app.post("/optimize")
 def optimize_lineup(req: OptimizeRequest):
@@ -373,21 +381,25 @@ def optimize_lineup(req: OptimizeRequest):
                 if role == 'BOWL':
                     pts *= 1.05
                     
-        # Feature 1: Live Pitch Adjustments
-        if req.pitch_type == 'Spin':
-            if is_spin: pts *= 1.15
-            elif is_pace: pts *= 0.95
-        elif req.pitch_type == 'Pace':
-            if is_pace: pts *= 1.15
-            elif is_spin: pts *= 0.95
-            
-        # Feature 1: Live Weather Adjustments
+        # Feature 3: Contextual AI Pitch Adjustments
+        if req.pitch_type in ['Pace', 'Spin']:
+            if role in ['BOWL', 'AR']:
+                pts *= 1.10
+            elif role == 'BAT':
+                pts *= 0.95
+                
+        # Feature 3: Contextual AI Weather Adjustments
         if req.weather_condition == 'Overcast':
-            if is_pace: pts *= 1.10
-        elif req.weather_condition == 'Dew':
-            # Dew penalizes bowlers defending in the second innings
+            # Early swing advantage for Team Bowling First (which means they bat second)
             if not is_bat_first and role in ['BOWL', 'AR']:
+                pts *= 1.10
+        elif req.weather_condition == 'Dew':
+            # Extreme disadvantage for Team Bowling Second (which means they batted first)
+            if is_bat_first and role in ['BOWL', 'AR']:
                 pts *= 0.85
+            # Boost to Team Batting Second as the ball skids to the bat
+            if not is_bat_first and role in ['BAT', 'WK']:
+                pts *= 1.10
 
         return pts
     match_data['proj_points'] = match_data.apply(adjust_points, axis=1)

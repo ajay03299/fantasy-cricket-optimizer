@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, BrainCircuit, Activity, ChevronDown, ChevronUp, User, Lock, Ban, MapPin, Target, Zap } from 'lucide-react';
+import { Search, BrainCircuit, Activity, ChevronDown, ChevronUp, User, Lock, Ban, MapPin, Target, Zap, Download } from 'lucide-react';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, PieChart, Pie, Cell, Tooltip, BarChart, Bar, CartesianGrid, XAxis, YAxis, Legend } from 'recharts';
 import { useSearchParams } from 'react-router-dom';
 import { cn } from '../utils';
@@ -34,8 +34,6 @@ export default function Dashboard() {
   const [battingFirstTeam, setBattingFirstTeam] = useState('NONE');
   const [pitchType, setPitchType] = useState('Neutral');
   const [weatherCondition, setWeatherCondition] = useState('Clear');
-  const [backtestData, setBacktestData] = useState(null);
-  const [isBacktesting, setIsBacktesting] = useState(false);
   const [swapModePlayerId, setSwapModePlayerId] = useState(null);
   const [swapError, setSwapError] = useState(null);
   const [modalPlayer, setModalPlayer] = useState(null);
@@ -117,7 +115,6 @@ export default function Dashboard() {
   const handleOptimize = async () => {
     setIsCalculating(true);
     setIsOptimized(false);
-    setBacktestData(null);
     
     try {
       const res = await fetch('http://localhost:8000/optimize', {
@@ -153,6 +150,31 @@ export default function Dashboard() {
     } finally {
       setIsCalculating(false);
     }
+  };
+
+  const exportToCsv = () => {
+    if (!generatedLineups || generatedLineups.length === 0) return;
+    
+    let csvContent = "Lineup_Number,Player_1,Player_2,Player_3,Player_4,Player_5,Player_6,Player_7,Player_8,Player_9,Player_10,Player_11\n";
+    
+    generatedLineups.forEach((lineup, index) => {
+      const optimal = lineup.filter(p => p.isOptimal);
+      const sorted = [...optimal].sort((a,b) => {
+          const roleOrder = { 'WK': 1, 'BAT': 2, 'AR': 3, 'BOWL': 4 };
+          return roleOrder[a.role] - roleOrder[b.role];
+      });
+      const names = sorted.map(p => `"${p.name} (${p.role})"`);
+      csvContent += `${index + 1},${names.join(",")}\n`;
+    });
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `optimizer_lineups_${team1}_vs_${team2}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const teamData = [];
@@ -229,20 +251,6 @@ export default function Dashboard() {
          if (!data.error) setH2hStats(data);
       })
       .catch(console.error);
-  };
-
-  const handleBacktest = async () => {
-    setIsBacktesting(true);
-    setBacktestData(null);
-    try {
-      const res = await fetch(`http://localhost:8000/backtest/${matchId}`);
-      const data = await res.json();
-      if (!data.error) setBacktestData(data.real_scores);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setIsBacktesting(false);
-    }
   };
 
   return (
@@ -342,20 +350,14 @@ export default function Dashboard() {
             )}
           </button>
 
-          {isOptimized && (
+          {isOptimized && generatedLineups.length > 0 && (
             <button
-              onClick={handleBacktest}
-              disabled={isBacktesting}
-              className={cn(
-                "px-4 py-3 rounded-lg font-bold flex items-center gap-2 transition-all duration-300 border",
-                isBacktesting 
-                  ? "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed" 
-                  : backtestData ? "bg-amber-500/20 text-amber-400 border-amber-500 hover:bg-amber-500/30" : "bg-slate-900 hover:bg-slate-800 text-indigo-400 border-indigo-500/30 hover:border-indigo-400"
-              )}
-              title="Compare against actual match score"
+              onClick={exportToCsv}
+              className="px-4 py-3 rounded-lg font-bold flex items-center gap-2 transition-all duration-300 border bg-indigo-500/10 text-indigo-400 border-indigo-500/30 hover:bg-indigo-500/20 hover:border-indigo-400"
+              title="Export all generated lineups to CSV"
             >
-              <Activity className={cn("w-4 h-4", isBacktesting && "animate-spin")} />
-              <span className="hidden xl:inline">{backtestData ? "Backtested" : "Time Machine"}</span>
+              <Download className="w-4 h-4" />
+              <span className="hidden xl:inline">Export CSV</span>
             </button>
           )}
         </div>
@@ -684,26 +686,26 @@ export default function Dashboard() {
             {isOptimized ? (
               <div className="absolute inset-0 z-10 transition-opacity duration-300" style={{ opacity: isCalculating ? 0.3 : 1 }}>
                 {/* Wicket Keeper */}
-                <PlayerNode player={optimalPlayers.find(p => p.role === 'WK')} top="8%" left="50%" onSwapClick={(p) => setSwapModePlayerId(p.id)} swapSourceActive={swapModePlayerId === optimalPlayers.find(p => p.role === 'WK')?.id} realScore={backtestData?.[optimalPlayers.find(p => p.role === 'WK')?.name]} />
+                <PlayerNode player={optimalPlayers.find(p => p.role === 'WK')} top="8%" left="50%" onSwapClick={(p) => setSwapModePlayerId(p.id)} swapSourceActive={swapModePlayerId === optimalPlayers.find(p => p.role === 'WK')?.id} />
                 
                 {/* Bowlers */}
                 <div className="absolute w-full top-[25%] flex justify-around px-8">
                   {optimalPlayers.filter(p => p.role === 'BOWL').map((p, i) => (
-                    <PlayerNode key={p.id} player={p} pos="relative" onSwapClick={(p) => setSwapModePlayerId(p.id)} swapSourceActive={swapModePlayerId === p.id} realScore={backtestData?.[p.name]} />
+                    <PlayerNode key={p.id} player={p} pos="relative" onSwapClick={(p) => setSwapModePlayerId(p.id)} swapSourceActive={swapModePlayerId === p.id} />
                   ))}
                 </div>
 
                 {/* All Rounders */}
                 <div className="absolute w-full top-[50%] flex justify-around px-16">
                   {optimalPlayers.filter(p => p.role === 'AR').map((p, i) => (
-                    <PlayerNode key={p.id} player={p} pos="relative" onSwapClick={(p) => setSwapModePlayerId(p.id)} swapSourceActive={swapModePlayerId === p.id} realScore={backtestData?.[p.name]} />
+                    <PlayerNode key={p.id} player={p} pos="relative" onSwapClick={(p) => setSwapModePlayerId(p.id)} swapSourceActive={swapModePlayerId === p.id} />
                   ))}
                 </div>
 
                 {/* Batsmen */}
                 <div className="absolute w-full top-[75%] flex justify-around px-12">
                   {optimalPlayers.filter(p => p.role === 'BAT').map((p, i) => (
-                    <PlayerNode key={p.id} player={p} pos="relative" onSwapClick={(p) => setSwapModePlayerId(p.id)} swapSourceActive={swapModePlayerId === p.id} realScore={backtestData?.[p.name]} />
+                    <PlayerNode key={p.id} player={p} pos="relative" onSwapClick={(p) => setSwapModePlayerId(p.id)} swapSourceActive={swapModePlayerId === p.id} />
                   ))}
                 </div>
               </div>
@@ -1075,7 +1077,7 @@ export default function Dashboard() {
   );
 }
 
-function PlayerNode({ player, top, left, pos = "absolute", onSwapClick, swapSourceActive, realScore }) {
+function PlayerNode({ player, top, left, pos = "absolute", onSwapClick, swapSourceActive }) {
   if (!player) return null;
   
   const style = pos === 'absolute' ? { top, left, transform: 'translate(-50%, -50%)' } : {};
@@ -1100,18 +1102,13 @@ function PlayerNode({ player, top, left, pos = "absolute", onSwapClick, swapSour
           !swapSourceActive ? "border-emerald-400 shadow-[0_0_15px_rgba(52,211,153,0.3)] hover:shadow-[0_0_20px_rgba(52,211,153,0.5)]" : "border-cyan-400 shadow-[0_0_25px_rgba(34,211,238,0.8)]"
         )}>
            <User className={cn("w-6 h-6 absolute transition-opacity duration-300", swapSourceActive ? "text-cyan-400 opacity-80" : "text-slate-400 opacity-50")} />
-           {realScore !== undefined && realScore !== null ? (
-               <span className="font-black text-amber-400 text-lg z-10 bg-slate-900/90 px-1.5 py-0.5 rounded drop-shadow-md">{realScore}</span>
-           ) : (
-               <span className="font-bold text-white text-[10px] z-10 bg-slate-900/80 px-1 rounded truncate max-w-[40px]">{player.name.split(' ')[1] || player.name}</span>
-           )}
+           <span className="font-bold text-white text-[10px] z-10 bg-slate-900/80 px-1 rounded truncate max-w-[40px]">{player.name.split(' ')[1] || player.name}</span>
         </div>
         
         {/* Tooltip */}
         <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 bg-slate-900 border border-slate-700 rounded p-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 whitespace-nowrap shadow-xl">
           <div className="text-xs font-bold text-white flex items-center gap-1.5">{player.name} {player.form_tag === 'hot' && '🔥'}</div>
           <div className="text-[10px] text-emerald-400">{player.proj_points.toFixed(1)} pts</div>
-          {realScore !== undefined && realScore !== null && <div className="text-[10px] text-amber-400 border-t border-slate-700/50 mt-1 pt-1">Actual: {realScore} pts</div>}
         </div>
         {player.isCaptain && (
           <div className="absolute -top-2 -right-2 bg-amber-500 text-slate-900 text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center border-2 border-slate-950 z-20">

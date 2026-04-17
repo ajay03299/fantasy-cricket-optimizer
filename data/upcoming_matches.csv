@@ -1,0 +1,71 @@
+match_id,date,team1,team2,venue,status,match_num
+1400001,2026-03-28,Royal Challengers Bengaluru,Sunrisers Hyderabad,"M. Chinnaswamy Stadium, Bengaluru",completed,1
+1400002,2026-03-29,Mumbai Indians,Kolkata Knight Riders,"Wankhede Stadium, Mumbai",completed,2
+1400003,2026-03-30,Rajasthan Royals,Chennai Super Kings,"Sawai Mansingh Stadium, Jaipur",completed,3
+1400004,2026-03-31,Punjab Kings,Gujarat Titans,"Maharaja Yadavindra Singh International Cricket Stadium, Mullanpur",completed,4
+1400005,2026-04-01,Lucknow Super Giants,Delhi Capitals,"BRSABV Ekana Cricket Stadium, Lucknow",completed,5
+1400006,2026-04-02,Kolkata Knight Riders,Sunrisers Hyderabad,"Eden Gardens, Kolkata",completed,6
+1400007,2026-04-03,Chennai Super Kings,Punjab Kings,"M. A. Chidambaram Stadium, Chennai",completed,7
+1400008,2026-04-04,Delhi Capitals,Mumbai Indians,"Arun Jaitley Stadium, Delhi",completed,8
+1400009,2026-04-04,Gujarat Titans,Rajasthan Royals,"Narendra Modi Stadium, Ahmedabad",completed,9
+1400010,2026-04-05,Sunrisers Hyderabad,Lucknow Super Giants,"Rajiv Gandhi International Cricket Stadium, Hyderabad",completed,10
+1400011,2026-04-05,Royal Challengers Bengaluru,Chennai Super Kings,"M. Chinnaswamy Stadium, Bengaluru",completed,11
+1400012,2026-04-06,Kolkata Knight Riders,Punjab Kings,"Eden Gardens, Kolkata",completed,12
+1400013,2026-04-07,Rajasthan Royals,Mumbai Indians,"Sawai Mansingh Stadium, Jaipur",completed,13
+1400014,2026-04-08,Delhi Capitals,Gujarat Titans,"Arun Jaitley Stadium, Delhi",completed,14
+1400015,2026-04-09,Kolkata Knight Riders,Lucknow Super Giants,"Eden Gardens, Kolkata",completed,15
+1400016,2026-04-10,Rajasthan Royals,Royal Challengers Bengaluru,"Sawai Mansingh Stadium, Jaipur",completed,16
+1400017,2026-04-11,Punjab Kings,Sunrisers Hyderabad,"Maharaja Yadavindra Singh International Cricket Stadium, Mullanpur",completed,17
+1400018,2026-04-11,Chennai Super Kings,Delhi Capitals,"M. A. Chidambaram Stadium, Chennai",completed,18
+1400019,2026-04-12,Lucknow Super Giants,Gujarat Titans,"BRSABV Ekana Cricket Stadium, Lucknow",completed,19
+1400020,2026-04-12,Mumbai Indians,Royal Challengers Bengaluru,"Wankhede Stadium, Mumbai",completed,20
+1400021,2026-04-13,Sunrisers Hyderabad,Rajasthan Royals,"Rajiv Gandhi International Cricket Stadium, Hyderabad",completed,21
+1400022,2026-04-14,Chennai Super Kings,Kolkata Knight Riders,"M. A. Chidambaram Stadium, Chennai",completed,22
+1400023,2026-04-15,Royal Challengers Bengaluru,Lucknow Super Giants,"M. Chinnaswamy Stadium, Bengaluru",completed,23
+1400024,2026-04-16,Mumbai Indians,Punjab Kings,"Wankhede Stadium, Mumbai",completed,24
+1400025,2026-04-17,Gujarat Titans,Kolkata Knight Riders,"Narendra Modi Stadium, Ahmedabad",upcoming,25
+1400026,2026-04-18,Royal Challengers Bengaluru,Delhi Capitals,"M. Chinnaswamy Stadium, Bengaluru",upcoming,26
+1400027,2026-04-18,Sunrisers Hyderabad,Chennai Super Kings,"Rajiv Gandhi International Cricket Stadium, Hyderabad",upcoming,27
+1400028,2026-04-19,Kolkata Knight Riders,Rajasthan Royals,"Eden Gardens, Kolkata",upcoming,28
+1400029,2026-04-19,Punjab Kings,Lucknow Super Giants,"Maharaja Yadavindra Singh International Cricket Stadium, Mullanpur",upcoming,29
+1400030,2026-04-20,Gujarat Titans,Mumbai Indians,"Narendra Modi Stadium, Ahmedabad",upcoming,30
+1400031,2026-04-21,Sunrisers Hyderabad,Delhi Capitals,"Rajiv Gandhi International Cricket Stadium, Hyderabad",upcoming,31
+1400032,2026-04-22,Lucknow Super Giants,Rajasthan Royals,"BRSABV Ekana Cricket Stadium, Lucknow",upcoming,32
+1400033,2026-04-23,Mumbai Indians,Chennai Super Kings,"Wankhede Stadium, Mumbai",upcoming,33
+1400034,2026-04-24,Royal Challengers Bengaluru,Gujarat Titans,"M. Chinnaswamy Stadium, Bengaluru",upcoming,34
+1400035,2026-04-25,Delhi Capitals,Punjab Kings,"Arun Jaitley Stadium, Delhi",upcoming,35
+1400036,2026-04-25,Rajasthan Royals,Sunrisers Hyderabad,"Sawai Mansingh Stadium, Jaipur",upcoming,36
+1400037,2026-04-26,Gujarat Titans,Chennai Super Kings,"Narendra Modi Stadium, Ahmedabad",upcoming,37
+1400038,2026-04-26,Lucknow Super Giants,Kolkata Knight Riders,"BRSABV Ekana Cricket Stadium, Lucknow",upcoming,38
+1400039,2026-04-27,Delhi Capitals,Royal Challengers Bengaluru,"Arun Jaitley Stadium, Delhi",upcoming,39
+1400040,2026-04-28,Punjab Kings,Rajasthan Royals,"Maharaja Yadavindra Singh International Cricket Stadium, Mullanpur",upcoming,40
+1400041,2026-04-29,Mumbai Indians,Sunrisers Hyderabad,"Wankhede Stadium, Mumbai",upcoming,41
+1400042,2026-04-30,Gujarat Titans,Royal Challengers Bengaluru,"Narendra Modi Stadium, Ahmedabad",upcoming,42
+1400043,2026-05-01,Rajasthan Royals,Delhi Capitals,"Sawai Mansingh Stadium, Jaipur",upcoming,43
+1400044,2026-05-02,Chennai Super Kings,Mumbai Indians,"M. A. Chidambaram Stadium, Chennai",upcoming,44
+1400045,2026-05-03,Sunrisers Hyderabad,Kolkata Knight Riders,"Rajiv Gandhi International Cricket Stadium, Hyderabad",upcoming,45
+1400046,2026-05-03,Gujarat Titans,Punjab Kings,"Narendra Modi Stadium, Ahmedabad",upcoming,46
+1400047,2026-05-04,Mumbai Indians,Lucknow Super Giants,"Wankhede Stadium, Mumbai",upcoming,47
+1400048,2026-05-05,Delhi Capitals,Chennai Super Kings,"Arun Jaitley Stadium, Delhi",upcoming,48
+1400049,2026-05-06,Sunrisers Hyderabad,Punjab Kings,"Rajiv Gandhi International Cricket Stadium, Hyderabad",upcoming,49
+1400050,2026-05-07,Lucknow Super Giants,Royal Challengers Bengaluru,"BRSABV Ekana Cricket Stadium, Lucknow",upcoming,50
+1400051,2026-05-08,Delhi Capitals,Kolkata Knight Riders,"Arun Jaitley Stadium, Delhi",upcoming,51
+1400052,2026-05-09,Rajasthan Royals,Gujarat Titans,"Sawai Mansingh Stadium, Jaipur",upcoming,52
+1400053,2026-05-10,Chennai Super Kings,Lucknow Super Giants,"M. A. Chidambaram Stadium, Chennai",upcoming,53
+1400054,2026-05-10,Royal Challengers Bengaluru,Mumbai Indians,"M. Chinnaswamy Stadium, Bengaluru",upcoming,54
+1400055,2026-05-11,Punjab Kings,Delhi Capitals,"Maharaja Yadavindra Singh International Cricket Stadium, Mullanpur",upcoming,55
+1400056,2026-05-12,Gujarat Titans,Sunrisers Hyderabad,"Narendra Modi Stadium, Ahmedabad",upcoming,56
+1400057,2026-05-13,Royal Challengers Bengaluru,Kolkata Knight Riders,"M. Chinnaswamy Stadium, Bengaluru",upcoming,57
+1400058,2026-05-14,Punjab Kings,Mumbai Indians,"Maharaja Yadavindra Singh International Cricket Stadium, Mullanpur",upcoming,58
+1400059,2026-05-15,Lucknow Super Giants,Chennai Super Kings,"BRSABV Ekana Cricket Stadium, Lucknow",upcoming,59
+1400060,2026-05-16,Kolkata Knight Riders,Gujarat Titans,"Eden Gardens, Kolkata",upcoming,60
+1400061,2026-05-17,Punjab Kings,Royal Challengers Bengaluru,"Maharaja Yadavindra Singh International Cricket Stadium, Mullanpur",upcoming,61
+1400062,2026-05-17,Delhi Capitals,Rajasthan Royals,"Arun Jaitley Stadium, Delhi",upcoming,62
+1400063,2026-05-18,Chennai Super Kings,Sunrisers Hyderabad,"M. A. Chidambaram Stadium, Chennai",upcoming,63
+1400064,2026-05-19,Rajasthan Royals,Lucknow Super Giants,"Sawai Mansingh Stadium, Jaipur",upcoming,64
+1400065,2026-05-20,Kolkata Knight Riders,Mumbai Indians,"Eden Gardens, Kolkata",upcoming,65
+1400066,2026-05-21,Chennai Super Kings,Gujarat Titans,"M. A. Chidambaram Stadium, Chennai",upcoming,66
+1400067,2026-05-22,Sunrisers Hyderabad,Royal Challengers Bengaluru,"Rajiv Gandhi International Cricket Stadium, Hyderabad",upcoming,67
+1400068,2026-05-23,Lucknow Super Giants,Punjab Kings,"BRSABV Ekana Cricket Stadium, Lucknow",upcoming,68
+1400069,2026-05-24,Mumbai Indians,Rajasthan Royals,"Wankhede Stadium, Mumbai",upcoming,69
+1400070,2026-05-24,Kolkata Knight Riders,Delhi Capitals,"Eden Gardens, Kolkata",upcoming,70

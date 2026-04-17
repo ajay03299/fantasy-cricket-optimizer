@@ -12,9 +12,9 @@ export default function Matches() {
     fetch('http://localhost:8000/matches')
       .then(res => res.json())
       .then(data => {
-        const formattedData = data.map((match, index) => ({
+        const formattedData = data.map((match) => ({
           ...match,
-          status: index < 5 ? 'Upcoming' : 'Completed',
+          status: match.status ? (match.status.charAt(0).toUpperCase() + match.status.slice(1)) : 'Completed',
           matchType: 'T20'
         }));
         setUpcomingMatches(formattedData);
