@@ -1,7 +1,6 @@
 <div align="center">
-  <img src="https://media.istockphoto.com/id/1141191007/vector/sports-concept-with-cricket-equipment.jpg?s=612x612&w=0&k=20&c=B3a6p-h_6O7qYt9V4C7d1l7B6o7B3c6p-h_6O7B3c6=" width="200" alt="FCML Studio Logo"/>
-  <h1>🏏 FCML Studio: Machine Learning Fantasy Cricket Optimizer</h1>
-  <p>A Professional-Grade Lineup Generator built on Operations Research, Contextual AI, and Advanced Analytics tailored for Daily Fantasy Sports.</p>
+  <h1>FCML Studio: Machine Learning Fantasy Cricket Optimizer</h1>
+  <p>A Data-Driven Lineup Generator Built on Operations Research, Contextual AI, and Advanced Analytics Tailored for Daily Fantasy Sports.</p>
 
   [![React](https://img.shields.io/badge/React-18.x-61DAFB?logo=react&logoColor=black)](https://reactjs.org/)
   [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -11,81 +10,83 @@
 
 <hr/>
 
-## 📖 About The Project
+## About The Project
 
-Generating winning Daily Fantasy lineups (like Dream11) is no longer about guessing; it's a mathematical optimization problem. **FCML Studio** transforms raw, ball-by-ball cricket data into mathematically flawless structural lineages using the **`0-1 Knapsack` Algorithm**.
+Generating high-yield Daily Fantasy lineups (such as for Dream11) is mathematically defined as a 0-1 Knapsack Optimization problem. **FCML Studio** transforms raw, ball-by-ball performance data into structured, rule-compliant combinatorial lineages through deterministic machine learning and integer linear programming.
 
-Unlike basic statistical apps, this suite natively features **Contextual AI**. It alters projected fantasy points in real-time based on live stadium conditions, such as reducing the scoring probability of 2nd-innings spinners if **"Heavy Dew"** is selected during a night match. 
+This engine separates itself from conventional statistical analyzers by engineering **Contextual Matrix Optimization**. It manipulates base projected fantasy thresholds in real-time according to live stadium environments—autonomously restructuring the probability weight of secondary spinners, for example, when heavy dew factors restrict their efficacy.
 
-## ✨ Key Features
+## Architecture & Features
 
-* 🧠 **Mathematical PuLP Solver (Knapsack):** Binds to real-world structural constraints (Strict 100 Credit Cap, exact positional arrays of 1-4 WKs / 3-6 BATs / 1-4 ARs / 3-6 BOWLs, capping at max 7 players per franchise).
-* ⛅ **Contextual Environmental Modifiers:** Live Dropdowns for *Spin Pitches*, *Pace Pitches*, *Overcast Weather*, and *Heavy Dew* dynamically mutate projected player scores instantaneously before optimization. 
-* 🕷️ **Automated Schedule Web Scraper:** Uses automated Python-regex routines to fetch and synchronize live current season data, mapping completed and upcoming matches straight to the dashboard.
-* ⚡ **Bulk CSV Exporter:** Supports competitive DFS players by sequentially wrapping and exporting up to 20 optimized line-ups to a localized `.csv` file for instant bulk-uploading.
-* 📊 **Deep Analytics HUD:** React Recharts generates *Powerplay / Middle Over / Death Over* execution Radar charts and Recent Form sparklines to graphically demystify the Optimizer's behavior.
+### 1. Operations Research (PuLP Integer Linear Programming)
+The engine executes multi-variable linear constraints to guarantee strictly valid arrays:
+- **Financial Bound:** Aggregated player credits strictly `≤ 100`.
+- **Structural Bounds:** Hard limits on standard fantasy roster configuration (e.g., 1-4 Wicket Keepers, 3-6 Batters, 1-4 All-Rounders, 3-6 Bowlers) while ensuring a strict `11` player total.
+- **Franchise Bounds:** Restricts player domination to a maximum of `7` selections from any single franchise entity to retain lineup variance.
 
-## 🛠️ Technology Stack
+### 2. Contextual Environment Modifiers
+Live Dropdowns allow the user to inject real-world context data into the model prior to execution. By parsing factors such as *Spin Pitch*, *Pace Pitch*, *Overcast Weather*, and *Heavy Dew*, the algorithm scales player point projections upward or downward mathematically, actively predicting how specific roles will fare before the toss.
+
+### 3. Automated Data Ingestion Workflow
+Instead of static historical datasets, the system executes an automated Python-based scraping routine to circumvent proxy protections, fetch live cricket fixture matrices, process stadium mapping relationships, and write actionable telemetry directly to the backend database endpoints.
+
+### 4. Bulk CSV Export Node
+Constructed for professional-level Daily Fantasy participants, the system generates continuous sequential matrices (up to 20 unique line-ups per cycle) and provides instantaneous `.csv` compilation for zero-friction bulk uploading directly to provider databases.
+
+### 5. Frontend Telemetry Dashboard
+A proprietary, interactive user interface heavily optimized utilizing React and Tailwind. The layout includes:
+- **Lock/Ban Matrix:** Explicitly force must-have players into the integer logic equation or permanently eliminate them.
+- **Deep Analytics HUD:** Dynamically generated Rechart components plot recent execution trajectory, economy averages, and micro-matchup trajectories cleanly onto the screen.
+
+## Technology Stack
 
 **Frontend Framework**
-* **React.js** (Hook-driven Interactive UI)
-* **Vite** (Lightning-fast HMR and Bundling)
-* **Tailwind CSS** (Utility-first styling, neon-cyberpunk aesthetic)
-* **Recharts** & **Lucide React** (Dynamic Visualizations & SVG icon handling)
+* **React.js** (Declarative interactive UI)
+* **Vite** (Next-generation frontend tooling and fast-bundling)
+* **Tailwind CSS** (Utility-first framework architecture)
+* **Recharts** (Declarative data visualization charting)
 
 **Backend Intelligence**
-* **FastAPI** (Instantaneous JSON delivery and async route optimization)
-* **Pandas** (High-intensity matrix and Dataframe engineering)
-* **PuLP** (Operations Research Library executing the Integer Linear Programming logic)
-* **CloudScraper & Regex** (Circumvents 403 blocks for persistent schedule fetching)
+* **FastAPI** (High-performance async server frameworks)
+* **Pandas** (Analytical data manipulation)
+* **PuLP** (Linear programming model execution)
+* **CloudScraper & Regex** (Automated DOM parsing and bot-protection circumvention)
 
 <br/>
 
-## 🚀 Getting Started
+## Local Deployment Instructions
 
-Follow these steps to run the Optimizer locally on your machine. 
+Follow these commands to deploy the environment locally across two dependent shells.
 
-### Prerequisites
-* [Node.js](https://nodejs.org/en/) (v16.0+)
-* [Python](https://www.python.org/downloads/) (v3.10+)
-
-### 1. Backend Setup (FastAPI & ML)
-Open your terminal and navigate to the `/api` directory.
+### 1. Backend Server Initialization
+Navigate to the `/api` directory to install dependencies and boot the server application.
 ```bash
 cd api
 
-# Install required mathematical and API dependencies
+# Install backend dependencies
 pip install -r requirements.txt
 
-# Boot up the Uvicorn Local Server
+# Execute the ASGI Server locally
 python main.py
 ```
-*The server will spin up on `http://127.0.0.1:8000`.*
+*The host server will bind to `http://127.0.0.1:8000`.*
 
-### 2. Frontend Setup (React UI)
-Open a new terminal session and navigate to the `/frontend` directory.
+### 2. Frontend Render Initialization
+Open an adjacent shell and navigate to the `/frontend` directory.
 ```bash
 cd frontend
 
-# Install the Node packages
+# Install exact node modules
 npm install
 
-# Start the Vite Hot-Reloading server
+# Initialize Vite server environment
 npm run dev
 ```
-*Your interactive dashboard is now cleanly hosted on `http://localhost:5173`!*
+*The React UI render is actively hosted and accessible at `http://localhost:5173`.*
 
-<br/>
-
-## 🧩 Usage Guide
-
-1. **Dashboard Initialization:** Once loaded, navigate to the **Matches** pane to observe the scraped active Schedule. 
-2. **Setup your Environment:** 
-   * Hover over the `Weather` and `Pitch` toggles on the Optimizer screen to inject real-world context (If Heavy Dew is selected, be sure to utilize the **Toss** dropdown to lock in the team batting first!).
-3. **Impose your Logic:** 
-   * Click the 🔒 icon to Force a must-have player into the lineup, or the 🚫 icon to completely fade/ban a player whose form you distrust.
-4. **Generate Matrix:** Hit *Run ML Optimizer* to solve your structural arrays.
-5. **Download and Deploy:** Adjust the lineage count to 20, and click **Export CSV** to prep your download directly for any DFS hosting platform!
-
-## 🤝 Contribution
-If you have suggestions on bringing Deep Neural Net predictions or Live Endpoints (WebSockets) to the engine, feel free to Fork the project and open a Pull Request!
+## Active Usage Workflow
+1. Navigate via the dashboard to verify the active parsed schedule match.
+2. Formulate your mathematical constraints via the `Weather` and `Pitch` modifiers in the Optimization controls.
+3. Utilize the **Lock** or **Ban** nodes explicitly to limit the problem-space of the engine based on intrinsic player-knowledge.
+4. Activate the **Run ML Optimizer** engine to compile linear solutions.
+5. Set to render multi-lineage output (e.g., 20 Lineups) and execute **Export CSV** to cleanly package your deployment structure.
