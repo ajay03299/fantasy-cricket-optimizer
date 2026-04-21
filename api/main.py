@@ -57,11 +57,43 @@ ipl2026_player_match = None
 ipl2026_xi_by_team = None
 upcoming_match_meta = {}
 merged_team_rosters = None
+active_playing_squads = {}
 venue_avg_batting_one_side = {}
 venue_avg_phase = {}
 h2h_lookup = {}
 player_name_lower_lookup = {}
 player_names_by_surname = {}
+
+# Hand-curated corrections for 2026 season usage.
+PLAYER_ROLE_OVERRIDES_2026 = {
+    "Finn Allen": "BAT",
+    "Tim Seifert": "WK",
+}
+PLAYER_TEAM_OVERRIDES_2026 = {
+    "Tim Seifert": "Kolkata Knight Riders",
+    "Finn Allen": "Kolkata Knight Riders",
+    "Josh Hazlewood": "Royal Challengers Bengaluru",
+}
+PLAYER_FORCE_ACTIVE_2026 = {
+    "Josh Hazlewood": True,
+    "Jacob Duffy": False,
+    "Corbin Bosch": False,
+}
+PLAYER_FORM_DELTA_OVERRIDE_2026 = {
+    "Vipraj Nigam": -6.0,
+    "Tim Seifert": 4.0,
+}
+
+
+def _override_value_for_player(player_name: str, override_map: dict):
+    """Return override value by exact key first, then fuzzy-name match."""
+    pname = str(player_name)
+    if pname in override_map:
+        return override_map[pname]
+    for key, value in override_map.items():
+        if player_names_match(pname, str(key)):
+            return value
+    return None
 
 
 def normalize_venue_name(venue: str) -> str:
@@ -69,9 +101,14 @@ def normalize_venue_name(venue: str) -> str:
         return "unknown"
     venue_text = str(venue).strip().lower()
     venue_text = re.sub(r'["\'\n\r,\.()&]', '', venue_text)
+    # Canonical aliases for common feed variants/abbreviations.
+    venue_text = re.sub(r'\bbrsabv\b', 'bharat ratna shri atal bihari vajpayee', venue_text)
+    venue_text = re.sub(r'\bm a\b', 'ma', venue_text)
     venue_text = re.sub(r'\bcricket stadium\b', 'stadium', venue_text)
     venue_text = re.sub(r'\binternational stadium\b', 'stadium', venue_text)
     venue_text = re.sub(r'\bstad\b', 'stadium', venue_text)
+    venue_text = re.sub(r'\bekana cricket stadium\b', 'ekana stadium', venue_text)
+    venue_text = re.sub(r'\bchidambaram stadium chennai\b', 'chidambaram stadium chepauk chennai', venue_text)
     venue_text = re.sub(r'\s+', ' ', venue_text)
     return venue_text.strip()
 
@@ -192,6 +229,20 @@ def load_merged_team_rosters(project_root: str) -> dict:
                 except Exception:
                     continue
     return merged
+
+
+def load_active_playing_squads(project_root: str) -> dict:
+    import json
+
+    path = os.path.join(project_root, "data", "2026_active_playing_squads.json")
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            blob = json.load(f)
+        return blob if isinstance(blob, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
 
 
 def resolve_franchise_squad_key(team_schedule_name: str, squads: dict) -> Optional[str]:
@@ -362,6 +413,58 @@ def _surname_key(name: str) -> str:
     return _normalize_surname_token(parts[-1]) if parts else ""
 
 
+def _collapse_name_variants_for_match(players_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Collapse per-team name variants like 'K Yadav' and 'Kuldeep Yadav'
+    into a single row for optimizer/display.
+    """
+    if players_df is None or players_df.empty or "player_name" not in players_df.columns:
+        return players_df
+
+    kept_rows = []
+    consumed = set()
+    rows = players_df.reset_index(drop=True)
+
+    for i in range(len(rows)):
+        if i in consumed:
+            continue
+        base = rows.iloc[i]
+        cluster = [i]
+        for j in range(i + 1, len(rows)):
+            if j in consumed:
+                continue
+            cand = rows.iloc[j]
+            if str(base.get("team", "")) != str(cand.get("team", "")):
+                continue
+            if player_names_match(str(base["player_name"]), str(cand["player_name"])):
+                cluster.append(j)
+                consumed.add(j)
+
+        if len(cluster) == 1:
+            kept_rows.append(base.to_dict())
+            continue
+
+        # Prefer fuller name and stronger projection/confidence as representative.
+        cluster_rows = rows.iloc[cluster].copy()
+        cluster_rows["name_len"] = cluster_rows["player_name"].astype(str).str.len()
+        cluster_rows["proj_points_num"] = pd.to_numeric(cluster_rows.get("proj_points", 0), errors="coerce").fillna(0.0)
+        if "playing_confidence" in cluster_rows.columns:
+            cluster_rows["playing_conf_num"] = pd.to_numeric(cluster_rows.get("playing_confidence", 0), errors="coerce").fillna(0.0)
+        else:
+            cluster_rows["playing_conf_num"] = 0.0
+        cluster_rows = cluster_rows.sort_values(
+            by=["name_len", "playing_conf_num", "proj_points_num"],
+            ascending=[False, False, False],
+        )
+        rep = cluster_rows.iloc[0].to_dict()
+        rep["proj_points"] = float(cluster_rows["proj_points_num"].max())
+        rep["playing_confidence"] = float(cluster_rows["playing_conf_num"].max())
+        rep["is_probably_playing"] = bool(cluster_rows.get("is_probably_playing", pd.Series([False])).astype(bool).any())
+        kept_rows.append(rep)
+
+    return pd.DataFrame(kept_rows)
+
+
 def _build_h2h_lookup_table(hist_df: pd.DataFrame) -> dict:
     req_cols = {"player_name", "opponent_norm", "runs_scored", "balls_faced", "wickets"}
     if hist_df is None or hist_df.empty or not req_cols.issubset(hist_df.columns):
@@ -396,6 +499,7 @@ def _build_h2h_lookup_table(hist_df: pd.DataFrame) -> dict:
 def load_data():
     global df, bbb_matchups, ipl2026_player_match, ipl2026_xi_by_team, upcoming_match_meta, merged_team_rosters
     global h2h_lookup, player_name_lower_lookup, player_names_by_surname
+    global active_playing_squads
     import glob
     import re
     
@@ -526,6 +630,7 @@ def load_data():
 
     project_root = os.path.join(os.path.dirname(__file__), "..")
     merged_team_rosters = load_merged_team_rosters(project_root)
+    active_playing_squads = load_active_playing_squads(project_root)
 
     bb2026 = os.path.join(project_root, "IPL_2026", "ipl_2026_deliveries.csv")
     ipl2026_player_match, ipl2026_xi_by_team = build_ipl2026_aggregates(bb2026)
@@ -716,22 +821,80 @@ def get_squad_data(match_id: str):
             sub = sub[sub["match_no"] <= int(fixture_mno)]
         return int(len(sub))
 
-    def is_expected_or_active_player(player_name: str, franchise: str) -> bool:
-        # First check if player has appeared in IPL 2026
-        if count_ipl26_appearances(player_name, franchise) >= 1:
-            return True
-        # Check if player is in expected XI
+    def in_squad(player_name: str, franchise: str, squads_blob: dict) -> bool:
+        if not squads_blob:
+            return False
+        k = resolve_franchise_squad_key(franchise, squads_blob)
+        if not k or not squads_blob.get(k):
+            return False
+        return any(player_names_match(player_name, squad_player) for squad_player in squads_blob[k])
+
+    def playing_confidence_score(player_name: str, franchise: str) -> float:
+        forced = _override_value_for_player(str(player_name), PLAYER_FORCE_ACTIVE_2026)
+        if forced is True:
+            return 1.0
+        if forced is False:
+            return 0.0
+
+        fts = schedule_team_to_short(franchise) if franchise else None
+        team_match_nums = []
+        if fts and ipl2026_xi_by_team and (fts in ipl2026_xi_by_team):
+            team_match_nums = sorted(int(n) for n in ipl2026_xi_by_team.get(fts, {}).keys())
+        if fixture_mno is not None and team_match_nums:
+            if is_fix_upcoming:
+                valid_team_nums = [n for n in team_match_nums if n < int(fixture_mno)]
+            else:
+                valid_team_nums = [n for n in team_match_nums if n <= int(fixture_mno)]
+        else:
+            valid_team_nums = team_match_nums
+        team_latest = max(valid_team_nums) if valid_team_nums else None
+
+        apps = count_ipl26_appearances(player_name, franchise)
+        subp = pd.DataFrame()
+        if ipl2026_player_match is not None and not ipl2026_player_match.empty:
+            subp = ipl2026_player_match[ipl2026_player_match["player"].apply(lambda x: player_names_match(player_name, x))]
+            if fts:
+                subp = subp[subp["team_short"] == fts]
+            if fixture_mno is not None:
+                if is_fix_upcoming:
+                    subp = subp[subp["match_no"] < int(fixture_mno)]
+                else:
+                    subp = subp[subp["match_no"] <= int(fixture_mno)]
+
+        in_expected_xi = False
         if ipl2026_xi_by_team and fixture_mno is not None:
             expected = expected_xi_for_franchise(ipl2026_xi_by_team, franchise, int(fixture_mno))
-            if any(player_names_match(player_name, x) for x in expected):
-                return True
-        # Check if player is in modern squad (active squad list)
-        if modern_squads:
-            k = resolve_franchise_squad_key(franchise, modern_squads)
-            if k and modern_squads.get(k):
-                if any(player_names_match(player_name, squad_player) for squad_player in modern_squads[k]):
-                    return True
-        return False
+            in_expected_xi = any(player_names_match(player_name, x) for x in expected)
+        in_active_playing = in_squad(player_name, franchise, active_playing_squads)
+        in_modern_squad = in_squad(player_name, franchise, modern_squads)
+
+        if apps >= 1 and not subp.empty:
+            played_nums = sorted(int(n) for n in subp["match_no"].tolist())
+            last_played = played_nums[-1]
+            recency_gap = (team_latest - last_played) if team_latest is not None else 0
+            last2_team_nums = valid_team_nums[-2:] if len(valid_team_nums) >= 2 else valid_team_nums
+            played_last2 = len([n for n in played_nums if n in set(last2_team_nums)])
+
+            if in_expected_xi and played_last2 >= 1 and recency_gap <= 1:
+                return 1.0
+            if played_last2 >= 1 and recency_gap <= 1:
+                return 0.92
+            if recency_gap <= 2 and in_active_playing:
+                return 0.82
+            if recency_gap <= 2:
+                return 0.70
+            if recency_gap <= 4:
+                return 0.44
+            return 0.18
+
+        # No match participation yet in 2026.
+        if in_expected_xi and in_active_playing:
+            return 0.74
+        if in_active_playing:
+            return 0.58
+        if in_modern_squad:
+            return 0.24
+        return 0.08
 
     squad_json_path = os.path.join(os.path.dirname(__file__), "..", "data", "2026_active_squads.json")
     modern_squads = merged_team_rosters if merged_team_rosters else {}
@@ -781,12 +944,27 @@ def get_squad_data(match_id: str):
         unique_players = unique_players[unique_players['team'].isin([t1, t2])]
 
     if not unique_players.empty:
-        unique_players['is_probably_playing'] = unique_players.apply(
-            lambda row: is_expected_or_active_player(str(row['player_name']), str(row['team'])),
+        def apply_team_override(row):
+            p = str(row["player_name"])
+            override_team = _override_value_for_player(p, PLAYER_TEAM_OVERRIDES_2026)
+            if override_team in (t1, t2):
+                return override_team
+            return row["team"]
+
+        unique_players["team"] = unique_players.apply(apply_team_override, axis=1)
+        unique_players["Role"] = unique_players.apply(
+            lambda row: _override_value_for_player(str(row["player_name"]), PLAYER_ROLE_OVERRIDES_2026) or str(row.get("Role", "AR")),
             axis=1,
         )
+        unique_players["playing_confidence"] = unique_players.apply(
+            lambda row: playing_confidence_score(str(row["player_name"]), str(row["team"])),
+            axis=1,
+        )
+        unique_players["is_probably_playing"] = unique_players["playing_confidence"] >= 0.65
+        unique_players = _collapse_name_variants_for_match(unique_players)
     else:
         unique_players['is_probably_playing'] = []
+        unique_players["playing_confidence"] = []
 
     # Phase 3 — IPL 2026 form: role-aware hot form based on real 2026 match involvement.
     unique_players['is_truly_hot'] = False
@@ -892,6 +1070,12 @@ def get_squad_data(match_id: str):
             unique_players.at[idx, "proj_points"] = proj + boost
             unique_players.at[idx, "is_truly_hot"] = True
 
+        delta = _override_value_for_player(str(p_name), PLAYER_FORM_DELTA_OVERRIDE_2026)
+        if delta is not None:
+            unique_players.at[idx, "proj_points"] = float(unique_players.at[idx, "proj_points"]) + float(delta)
+            if float(delta) > 0:
+                unique_players.at[idx, "is_truly_hot"] = True
+
     return unique_players
 
 
@@ -903,6 +1087,13 @@ def match_data_for_season_realistic_optimizer(match_data: pd.DataFrame, match_id
     """
     if match_data.empty:
         return match_data
+    if "playing_confidence" in match_data.columns:
+        strong_pool = match_data[match_data["playing_confidence"] >= 0.65].copy()
+        if len(strong_pool) >= 11:
+            return strong_pool.reset_index(drop=True)
+        medium_pool = match_data[match_data["playing_confidence"] >= 0.50].copy()
+        if len(medium_pool) >= 11:
+            return medium_pool.reset_index(drop=True)
     if "is_probably_playing" in match_data.columns:
         active_pool = match_data[match_data["is_probably_playing"] == True].copy()
         if len(active_pool) >= 11:
@@ -954,11 +1145,20 @@ def _infer_bowling_style(player_name: str, role: str) -> str:
 def _is_batting_first_team(team: str, batting_first_team: Optional[str]) -> bool:
     if not batting_first_team or batting_first_team.upper().strip() in ("NONE", ""):
         return False
-    b = batting_first_team.upper().strip()
-    t = str(team).upper().strip()
-    parts = str(team).split()
-    abbr = "".join(p[0] for p in parts)[:3].upper() if parts else ""
-    return t == b or abbr == b
+    def norm_name(x: str) -> str:
+        s = str(x).strip().upper()
+        s = s.replace("BENGALURU", "BANGALORE")
+        s = re.sub(r"[^A-Z0-9 ]+", " ", s)
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
+
+    def abbr_name(x: str) -> str:
+        parts = [p for p in norm_name(x).split() if p]
+        return "".join(p[0] for p in parts)[:3].upper() if parts else ""
+
+    b = norm_name(str(batting_first_team))
+    t = norm_name(str(team))
+    return t == b or abbr_name(team) == b or abbr_name(batting_first_team) == t[:3]
 
 
 def lineup_context_multiplier(
@@ -985,50 +1185,50 @@ def lineup_context_multiplier(
     if batting_first_team and batting_first_team.upper().strip() not in ("NONE", ""):
         if is_bat_first:
             if role in ("BAT", "AR", "WK"):
-                m *= 1.05
+                m *= 1.12
         else:
             if role == "BOWL":
-                m *= 1.05
+                m *= 1.14
             elif role == "AR":
-                m *= 1.03
+                m *= 1.09
 
     # Pitch
     if pitch == "Pace":
         if role == "BAT":
-            m *= 1.06
+            m *= 1.08
         elif role == "WK":
-            m *= 1.06
+            m *= 1.08
         elif role == "BOWL":
             if style == "pace":
-                m *= 1.15
+                m *= 1.22
             elif style == "spin":
-                m *= 0.87
+                m *= 0.82
             else:
                 m *= 1.04
         elif role == "AR":
             if style == "pace":
-                m *= 1.11
+                m *= 1.17
             elif style == "spin":
-                m *= 0.91
+                m *= 0.86
             else:
                 m *= 1.04
     elif pitch == "Spin":
         if role == "BAT":
-            m *= 0.96
+            m *= 0.93
         elif role == "WK":
-            m *= 0.97
+            m *= 0.94
         elif role == "BOWL":
             if style == "spin":
-                m *= 1.17
+                m *= 1.24
             elif style == "pace":
-                m *= 0.85
+                m *= 0.80
             else:
                 m *= 1.03
         elif role == "AR":
             if style == "spin":
-                m *= 1.13
+                m *= 1.18
             elif style == "pace":
-                m *= 0.89
+                m *= 0.84
             else:
                 m *= 1.04
 
@@ -1036,24 +1236,25 @@ def lineup_context_multiplier(
     if weather == "Overcast":
         if role in ("BOWL", "AR"):
             if style == "pace":
-                m *= 1.10
+                m *= 1.15
             elif style == "spin":
-                m *= 0.95
+                m *= 0.92
             else:
                 m *= 1.03
         else:
-            m *= 0.98
+            m *= 0.95
         if not is_bat_first and role in ("BOWL", "AR") and style == "pace":
-            m *= 1.05
+            m *= 1.08
     elif weather == "Dew":
         if is_bat_first and role in ("BOWL", "AR"):
-            m *= 0.86
+            m *= 0.80
         if not is_bat_first and role in ("BAT", "WK"):
-            m *= 1.10
+            m *= 1.14
         if is_bat_first and role in ("BAT", "WK"):
-            m *= 1.03
+            m *= 1.05
 
-    return m
+    # Keep context effects strong but bounded.
+    return max(0.72, min(1.34, m))
 
 
 @app.get("/players/{match_id}")
@@ -1255,10 +1456,17 @@ def optimize_lineup(req: OptimizeRequest):
 
     def adjust_points(row):
         base = float(row["proj_points"])
-        if not bool(row.get("is_probably_playing", False)):
-            base *= 0.86
+        conf = float(row.get("playing_confidence", 0.5))
+        if conf >= 0.85:
+            base *= 1.08
+        elif conf >= 0.65:
+            base *= 1.04
+        elif conf >= 0.45:
+            base *= 0.88
+        elif conf >= 0.25:
+            base *= 0.62
         else:
-            base *= 1.06
+            base *= 0.38
         mult = lineup_context_multiplier(
             str(row["Role"]),
             str(row["player_name"]),
@@ -1267,7 +1475,10 @@ def optimize_lineup(req: OptimizeRequest):
             req.weather_condition,
             bat_team,
         )
-        return base * mult
+        # Amplify contextual signal so pitch/weather/toss settings clearly change XI composition.
+        context_amplified = 1.0 + (mult - 1.0) * 1.35
+        context_amplified = max(0.66, min(1.46, context_amplified))
+        return base * context_amplified
 
     match_data["proj_points"] = match_data.apply(adjust_points, axis=1)
         
