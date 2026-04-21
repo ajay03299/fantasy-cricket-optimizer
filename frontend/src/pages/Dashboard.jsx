@@ -8,9 +8,9 @@ import { getTeamLogo, getTeamTheme, getTeamLogoFit } from '../utils/logoUtils';
 export default function Dashboard() {
   const [searchParams] = useSearchParams();
   const [players, setPlayers] = useState([]);
-  const [matchId, setMatchId] = useState(searchParams.get('matchId') || '335982');
-  const team1 = searchParams.get('t1') || 'RCB';
-  const team2 = searchParams.get('t2') || 'CSK';
+  const [matchId, setMatchId] = useState(searchParams.get('matchId') || '1400011');
+  const team1 = searchParams.get('t1') || 'Royal Challengers Bengaluru';
+  const team2 = searchParams.get('t2') || 'Chennai Super Kings';
   const [matchContext, setMatchContext] = useState({
     venueAvg: 160,
     ppAvg: 45,
@@ -58,7 +58,7 @@ export default function Dashboard() {
     fetch(`http://localhost:8000/match_context/${matchId}`)
       .then(res => res.json())
       .then(data => {
-        if (data && data.venueAvg) {
+        if (data && Object.prototype.hasOwnProperty.call(data, 'venueAvg')) {
           setMatchContext(data);
         }
       })

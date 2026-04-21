@@ -1,0 +1,374 @@
+{
+    "H. Klaasen": {
+        "player_name": "H. Klaasen",
+        "matches_played": 6,
+        "runs": 283,
+        "wickets": 0
+    },
+    "S. Gill": {
+        "player_name": "S. Gill",
+        "matches_played": 4,
+        "runs": 251,
+        "wickets": 0
+    },
+    "V. Kohli": {
+        "player_name": "V. Kohli",
+        "matches_played": 6,
+        "runs": 247,
+        "wickets": 0
+    },
+    "R. Patidar": {
+        "player_name": "R. Patidar",
+        "matches_played": 6,
+        "runs": 230,
+        "wickets": 0
+    },
+    "I. Kishan": {
+        "player_name": "I. Kishan",
+        "matches_played": 6,
+        "runs": 213,
+        "wickets": 0
+    },
+    "P. Singh": {
+        "player_name": "P. Singh",
+        "matches_played": 5,
+        "runs": 211,
+        "wickets": 0
+    },
+    "S. Iyer": {
+        "player_name": "S. Iyer",
+        "matches_played": 5,
+        "runs": 203,
+        "wickets": 0
+    },
+    "P. Salt": {
+        "player_name": "P. Salt",
+        "matches_played": 6,
+        "runs": 202,
+        "wickets": 0
+    },
+    "A. Mhatre": {
+        "player_name": "A. Mhatre",
+        "matches_played": 6,
+        "runs": 201,
+        "wickets": 0
+    },
+    "J. Buttler": {
+        "player_name": "J. Buttler",
+        "matches_played": 5,
+        "runs": 201,
+        "wickets": 0
+    },
+    "V. Sooryavanshi": {
+        "player_name": "V. Sooryavanshi",
+        "matches_played": 5,
+        "runs": 200,
+        "wickets": 0
+    },
+    "S. Samson": {
+        "player_name": "S. Samson",
+        "matches_played": 6,
+        "runs": 192,
+        "wickets": 0
+    },
+    "A. Raghuvanshi": {
+        "player_name": "A. Raghuvanshi",
+        "matches_played": 6,
+        "runs": 190,
+        "wickets": 0
+    },
+    "A. Sharma": {
+        "player_name": "A. Sharma",
+        "matches_played": 6,
+        "runs": 188,
+        "wickets": 6
+    },
+    "Y. Jaiswal": {
+        "player_name": "Y. Jaiswal",
+        "matches_played": 5,
+        "runs": 184,
+        "wickets": 0
+    },
+    "D. Jurel": {
+        "player_name": "D. Jurel",
+        "matches_played": 5,
+        "runs": 176,
+        "wickets": 0
+    },
+    "T. David": {
+        "player_name": "T. David",
+        "matches_played": 6,
+        "runs": 173,
+        "wickets": 0
+    },
+    "T. Stubbs": {
+        "player_name": "T. Stubbs",
+        "matches_played": 5,
+        "runs": 169,
+        "wickets": 0
+    },
+    "K. Rahul": {
+        "player_name": "K. Rahul",
+        "matches_played": 5,
+        "runs": 168,
+        "wickets": 0
+    },
+    "S. Rizvi": {
+        "player_name": "S. Rizvi",
+        "matches_played": 5,
+        "runs": 168,
+        "wickets": 0
+    },
+    "PBKS": {
+        "player_name": "PBKS",
+        "matches_played": 4,
+        "runs": 1,
+        "wickets": 9
+    },
+    "RCB": {
+        "player_name": "RCB",
+        "matches_played": 4,
+        "runs": 0,
+        "wickets": 8
+    },
+    "RR": {
+        "player_name": "RR",
+        "matches_played": 4,
+        "runs": 0,
+        "wickets": 8
+    },
+    "DC": {
+        "player_name": "DC",
+        "matches_played": 3,
+        "runs": 0,
+        "wickets": 6
+    },
+    "GT": {
+        "player_name": "GT",
+        "matches_played": 3,
+        "runs": 0,
+        "wickets": 6
+    },
+    "Matthew Hayden (CSK)": {
+        "player_name": "Matthew Hayden (CSK)",
+        "matches_played": 572,
+        "runs": 52,
+        "wickets": 0
+    },
+    "Robin Uthappa (KKR)": {
+        "player_name": "Robin Uthappa (KKR)",
+        "matches_played": 660,
+        "runs": 44,
+        "wickets": 0
+    },
+    "A. Kamboj": {
+        "player_name": "A. Kamboj",
+        "matches_played": 6,
+        "runs": 0,
+        "wickets": 13
+    },
+    "P. Krishna": {
+        "player_name": "P. Krishna",
+        "matches_played": 5,
+        "runs": 0,
+        "wickets": 11
+    },
+    "B. Kumar": {
+        "player_name": "B. Kumar",
+        "matches_played": 6,
+        "runs": 0,
+        "wickets": 10
+    },
+    "P. Yadav": {
+        "player_name": "P. Yadav",
+        "matches_played": 5,
+        "runs": 0,
+        "wickets": 9
+    },
+    "R. Bishnoi": {
+        "player_name": "R. Bishnoi",
+        "matches_played": 5,
+        "runs": 0,
+        "wickets": 9
+    },
+    "K. Pandya": {
+        "player_name": "K. Pandya",
+        "matches_played": 6,
+        "runs": 0,
+        "wickets": 8
+    },
+    "J. Overton": {
+        "player_name": "J. Overton",
+        "matches_played": 5,
+        "runs": 0,
+        "wickets": 8
+    },
+    "J. Archer": {
+        "player_name": "J. Archer",
+        "matches_played": 5,
+        "runs": 0,
+        "wickets": 7
+    },
+    "K. Rabada": {
+        "player_name": "K. Rabada",
+        "matches_played": 5,
+        "runs": 0,
+        "wickets": 7
+    },
+    "L. Ngidi": {
+        "player_name": "L. Ngidi",
+        "matches_played": 5,
+        "runs": 0,
+        "wickets": 7
+    },
+    "V. Arora": {
+        "player_name": "V. Arora",
+        "matches_played": 6,
+        "runs": 0,
+        "wickets": 7
+    },
+    "R. Khan": {
+        "player_name": "R. Khan",
+        "matches_played": 5,
+        "runs": 0,
+        "wickets": 6
+    },
+    "E. Malinga": {
+        "player_name": "E. Malinga",
+        "matches_played": 6,
+        "runs": 0,
+        "wickets": 6
+    },
+    "J. Duffy": {
+        "player_name": "J. Duffy",
+        "matches_played": 3,
+        "runs": 0,
+        "wickets": 6
+    },
+    "S. Thakur": {
+        "player_name": "S. Thakur",
+        "matches_played": 5,
+        "runs": 0,
+        "wickets": 6
+    },
+    "R. Dar Salam": {
+        "player_name": "R. Dar Salam",
+        "matches_played": 3,
+        "runs": 0,
+        "wickets": 5
+    },
+    "H. Dubey": {
+        "player_name": "H. Dubey",
+        "matches_played": 5,
+        "runs": 0,
+        "wickets": 5
+    },
+    "N. Burger": {
+        "player_name": "N. Burger",
+        "matches_played": 5,
+        "runs": 0,
+        "wickets": 5
+    },
+    "M. Siraj": {
+        "player_name": "M. Siraj",
+        "matches_played": 5,
+        "runs": 0,
+        "wickets": 5
+    },
+    "Sohail Tanvir (RR)": {
+        "player_name": "Sohail Tanvir (RR)",
+        "matches_played": 22,
+        "runs": 0,
+        "wickets": 1
+    },
+    "RP Singh (Deccan Chargers)": {
+        "player_name": "RP Singh (Deccan Chargers)",
+        "matches_played": 23,
+        "runs": 0,
+        "wickets": 1
+    },
+    "Pragyan Ojha (Deccan Chargers)": {
+        "player_name": "Pragyan Ojha (Deccan Chargers)",
+        "matches_played": 21,
+        "runs": 0,
+        "wickets": 0
+    },
+    "Lasith Malinga (MI)": {
+        "player_name": "Lasith Malinga (MI)",
+        "matches_played": 28,
+        "runs": 0,
+        "wickets": 0
+    },
+    "Morne Morkel (DD)": {
+        "player_name": "Morne Morkel (DD)",
+        "matches_played": 25,
+        "runs": 0,
+        "wickets": 1
+    },
+    "Dwayne Bravo (CSK)": {
+        "player_name": "Dwayne Bravo (CSK)",
+        "matches_played": 32,
+        "runs": 0,
+        "wickets": 0
+    },
+    "Mohit Sharma (CSK)": {
+        "player_name": "Mohit Sharma (CSK)",
+        "matches_played": 23,
+        "runs": 0,
+        "wickets": 1
+    },
+    "Bhuvaneshwar Kumar (SRH)": {
+        "player_name": "Bhuvaneshwar Kumar (SRH)",
+        "matches_played": 26,
+        "runs": 0,
+        "wickets": 0
+    },
+    "Andrew Tye (PBKS)": {
+        "player_name": "Andrew Tye (PBKS)",
+        "matches_played": 24,
+        "runs": 0,
+        "wickets": 3
+    },
+    "Imran Tahir (CSK)": {
+        "player_name": "Imran Tahir (CSK)",
+        "matches_played": 26,
+        "runs": 0,
+        "wickets": 2
+    },
+    "Kagiso Rabada (DC)": {
+        "player_name": "Kagiso Rabada (DC)",
+        "matches_played": 30,
+        "runs": 0,
+        "wickets": 2
+    },
+    "Harshal Patel (RCB)": {
+        "player_name": "Harshal Patel (RCB)",
+        "matches_played": 32,
+        "runs": 0,
+        "wickets": 1
+    },
+    "Yuzvendra Chahal (RR)": {
+        "player_name": "Yuzvendra Chahal (RR)",
+        "matches_played": 27,
+        "runs": 0,
+        "wickets": 1
+    },
+    "Mohammed Shami (GT)": {
+        "player_name": "Mohammed Shami (GT)",
+        "matches_played": 28,
+        "runs": 0,
+        "wickets": 2
+    },
+    "Harshal Patel (PBKS)": {
+        "player_name": "Harshal Patel (PBKS)",
+        "matches_played": 24,
+        "runs": 0,
+        "wickets": 0
+    },
+    "Prasidh Krishna (GT)": {
+        "player_name": "Prasidh Krishna (GT)",
+        "matches_played": 25,
+        "runs": 0,
+        "wickets": 1
+    }
+}

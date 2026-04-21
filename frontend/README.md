@@ -1,16 +1,64 @@
-# React + Vite
+# IPL 2026 Fantasy Cricket Optimizer Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This is the React frontend for the IPL 2026 Fantasy Cricket Optimizer, built with Vite, React, and Tailwind CSS.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- Interactive dashboard for fantasy cricket lineup optimization
+- Real-time player filtering based on IPL 2026 active players
+- Lock/Ban functionality for player constraints
+- Environmental modifiers (pitch type, weather conditions)
+- Bulk lineup generation and CSV export
+- Analytics dashboard with player statistics and matchups
 
-## React Compiler
+## Getting Started
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### Prerequisites
+- Node.js 18+
+- npm or yarn
 
-## Expanding the ESLint configuration
+### Installation
+```bash
+npm install
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+### Development
+```bash
+npm run dev
+```
+
+### Build for Production
+```bash
+npm run build
+```
+
+## Tech Stack
+
+- **React 18** - UI framework
+- **Vite** - Build tool and dev server
+- **Tailwind CSS** - Styling
+- **Recharts** - Data visualization
+- **React Router** - Navigation
+
+## Project Structure
+
+```
+frontend/
+├── public/          # Static assets
+├── src/
+│   ├── components/  # Reusable UI components
+│   ├── pages/       # Page components (Dashboard, Matches, etc.)
+│   ├── utils/       # Utility functions
+│   └── assets/      # Images and icons
+├── package.json
+└── vite.config.js
+```
+
+## API Integration
+
+The frontend communicates with the FastAPI backend running on `http://localhost:8000`. Key endpoints:
+
+- `GET /matches` - Get available matches
+- `GET /players/{match_id}` - Get players for a match
+- `POST /optimize` - Run lineup optimization
+- `GET /player_stats/{match_id}/{player_name}` - Get detailed player stats

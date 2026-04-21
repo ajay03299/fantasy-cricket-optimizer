@@ -1,11 +1,37 @@
+import hashlib
 import os
 import random
+import re
 import pandas as pd
 import pulp
+from datetime import datetime
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
+
+try:
+    from api.ipl2026_loader import (
+        SHORT_TO_SCHEDULE_NAME,
+        build_ipl2026_aggregates,
+        expected_xi_for_franchise,
+        ipl2026_form_context,
+        ipl2026_onfield_appearances_before_fixture,
+        ipl2026_recent_matches_for_player,
+        ipl2026_season_l5_percentile_line,
+        schedule_team_to_short,
+    )
+except ImportError:
+    from ipl2026_loader import (
+        SHORT_TO_SCHEDULE_NAME,
+        build_ipl2026_aggregates,
+        expected_xi_for_franchise,
+        ipl2026_form_context,
+        ipl2026_onfield_appearances_before_fixture,
+        ipl2026_recent_matches_for_player,
+        ipl2026_season_l5_percentile_line,
+        schedule_team_to_short,
+    )
 
 app = FastAPI()
 
@@ -27,10 +53,296 @@ class OptimizeRequest(BaseModel):
 
 df = None
 bbb_matchups = None
+ipl2026_player_match = None
+ipl2026_xi_by_team = None
+upcoming_match_meta = {}
+merged_team_rosters = None
+venue_avg_batting_one_side = {}
+venue_avg_phase = {}
+
+
+def normalize_venue_name(venue: str) -> str:
+    if venue is None:
+        return "unknown"
+    venue_text = str(venue).strip().lower()
+    venue_text = re.sub(r'["\'\n\r,\.()&]', '', venue_text)
+    venue_text = re.sub(r'\bcricket stadium\b', 'stadium', venue_text)
+    venue_text = re.sub(r'\binternational stadium\b', 'stadium', venue_text)
+    venue_text = re.sub(r'\bstad\b', 'stadium', venue_text)
+    venue_text = re.sub(r'\s+', ' ', venue_text)
+    return venue_text.strip()
+
+
+def simplify_venue_name(venue: str) -> str:
+    normalized = normalize_venue_name(venue)
+    parts = normalized.split()
+    if 'stadium' in parts:
+        idx = parts.index('stadium')
+        return " ".join(parts[: idx + 1])
+    if 'park' in parts:
+        idx = parts.index('park')
+        return " ".join(parts[: idx + 1])
+    if 'oval' in parts:
+        idx = parts.index('oval')
+        return " ".join(parts[: idx + 1])
+    return normalized
+
+
+def load_venue_batting_averages(project_root: str) -> dict:
+    cleaned_paths = [
+        os.path.join(project_root, "Cleaned_Dataset", "cleaned_master_dataset.csv"),
+        os.path.join(project_root, "data", "cleaned_master_dataset.csv"),
+    ]
+    cleaned_path = next((p for p in cleaned_paths if os.path.exists(p)), None)
+    if cleaned_path is None:
+        return {}
+
+    try:
+        cleaned = pd.read_csv(cleaned_path, usecols=["match_id", "team", "runs_scored", "venue"], low_memory=False)
+    except Exception:
+        return {}
+
+    cleaned["venue_norm"] = cleaned["venue"].fillna("unknown").map(normalize_venue_name)
+    cleaned["venue_simple"] = cleaned["venue"].fillna("unknown").map(simplify_venue_name)
+    team_totals = (
+        cleaned.groupby(["match_id", "team", "venue_norm", "venue_simple"], dropna=False)["runs_scored"]
+        .sum()
+        .reset_index()
+    )
+    venue_means = team_totals.groupby("venue_norm")["runs_scored"].mean()
+    venue_map = {key: float(value) for key, value in venue_means.items()}
+    for key, value in venue_means.items():
+        simple_key = simplify_venue_name(key)
+        if simple_key not in venue_map:
+            venue_map[simple_key] = float(value)
+    return venue_map
+
+
+def build_venue_phase_averages(df: pd.DataFrame) -> dict:
+    metrics = [
+        "venue_avg_total_runs_before",
+        "venue_avg_powerplay_runs_before",
+        "venue_avg_middle_overs_runs_before",
+        "venue_avg_death_overs_runs_before",
+    ]
+    if not all(col in df.columns for col in metrics):
+        return {}
+
+    agg = (
+        df[df["venue"].notna()]
+        .assign(venue_norm=df["venue"].map(normalize_venue_name))
+        .groupby("venue_norm")[metrics]
+        .mean()
+    )
+    result = {}
+    for venue_norm, row in agg.iterrows():
+        entry = {metric: float(row[metric]) for metric in metrics}
+        result[venue_norm] = entry
+        simple_key = simplify_venue_name(venue_norm)
+        if simple_key not in result:
+            result[simple_key] = entry
+    return result
+
+
+def load_merged_team_rosters(project_root: str) -> dict:
+    """Merge data/2026_active_squads.json with Team_Squad/*.json (official full squads) and CSV files."""
+    import json
+
+    merged = {}
+    base = os.path.join(project_root, "data", "2026_active_squads.json")
+    if os.path.exists(base):
+        with open(base, "r", encoding="utf-8") as f:
+            merged = json.load(f)
+    ts_dir = os.path.join(project_root, "Team_Squad")
+    if os.path.isdir(ts_dir):
+        for fn in sorted(os.listdir(ts_dir)):
+            if fn.endswith(".json"):
+                path = os.path.join(ts_dir, fn)
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        blob = json.load(f)
+                except (OSError, ValueError, TypeError):
+                    continue
+                if not isinstance(blob, dict):
+                    continue
+                for k, v in blob.items():
+                    if not isinstance(v, list):
+                        continue
+                    names = [str(x).strip() for x in v if str(x).strip()]
+                    merged.setdefault(k, [])
+                    seen = set(merged[k])
+                    for nm in names:
+                        if nm not in seen:
+                            merged[k].append(nm)
+                            seen.add(nm)
+            elif fn.endswith(".csv"):
+                path = os.path.join(ts_dir, fn)
+                try:
+                    csv_df = pd.read_csv(path)
+                    if 'Player' in csv_df.columns and 'Team' in csv_df.columns:
+                        for _, row in csv_df.iterrows():
+                            team_name = str(row['Team']).strip()
+                            player_name = str(row['Player']).strip()
+                            merged.setdefault(team_name, [])
+                            if player_name not in merged[team_name]:
+                                merged[team_name].append(player_name)
+                except Exception:
+                    continue
+    return merged
+
+
+def resolve_franchise_squad_key(team_schedule_name: str, squads: dict) -> Optional[str]:
+    """Map schedule / auction PDF names to keys present in squad JSON (e.g. RCB Bengaluru vs Bangalore)."""
+    if not squads or not team_schedule_name:
+        return None
+    t = str(team_schedule_name).strip()
+    if t in squads:
+        return t
+    tb = t.replace("Bengaluru", "Bangalore")
+    for k in squads:
+        if k.replace("Bengaluru", "Bangalore") == tb:
+            return k
+    if t == "Royal Challengers Bengaluru" and "Royal Challengers Bangalore" in squads:
+        return "Royal Challengers Bangalore"
+    return None
+
+
+WITHDRAWAL_2026 = [
+    "Pat Cummins",
+    "Sam Curran",
+    "Glenn Maxwell",
+    "Mayank Agarwal",
+    "Cameron Green",
+    "Ashutosh Sharma",
+]
+
+
+def append_roster_only_players(
+    unique_players: pd.DataFrame,
+    t1: str,
+    t2: str,
+    t1_players: list,
+    t2_players: list,
+    base_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Players present in merged squad lists but missing from historical df (name / new buy)."""
+    if not t1_players and not t2_players:
+        return unique_players
+
+    next_id = int(base_df["id"].max()) + 1 if "id" in base_df.columns else 0
+    add_rows = []
+    for team, roster in ((t1, t1_players), (t2, t2_players)):
+        side = unique_players[unique_players["team"] == team]
+        tmpl = None
+        if not side.empty:
+            tmpl = side.iloc[0]
+        elif not unique_players.empty:
+            tmpl = unique_players.iloc[0]
+
+        for rname in roster:
+            if unique_players["player_name"].apply(lambda n: player_names_match(n, rname)).any():
+                continue
+
+            if tmpl is not None:
+                nr = tmpl.copy()
+            else:
+                nr = pd.Series(
+                    {
+                        "player_name": rname,
+                        "team": team,
+                        "Role": "AR",
+                        "proj_points": 22.0,
+                        "credits": 8.0,
+                    }
+                )
+
+            nr["player_name"] = rname
+            nr["team"] = team
+            nr["modern_team"] = team
+            nr["proj_points"] = max(
+                17.0, min(36.0, float(nr.get("proj_points", 22.0)) * 0.82))
+            nr["credits"] = max(7.5, min(9.5, float(nr.get("credits", 8.0)) * 0.95))
+            nr["Role"] = "AR"
+            nr["id"] = next_id
+            next_id += 1
+            nr["is_withdrawn"] = any(player_names_match(rname, w) for w in WITHDRAWAL_2026)
+
+            for col in ("runs_scored", "wickets", "balls_bowled", "balls_faced"):
+                if col in nr.index:
+                    nr[col] = 0
+            add_rows.append(nr)
+
+    if not add_rows:
+        return unique_players
+    return pd.concat([unique_players, pd.DataFrame(add_rows)], ignore_index=True)
+
+
+def _normalize_surname_token(tok: str) -> str:
+    """Align spelling variants between feeds (e.g. IPL 2026 Sooryavanshi vs dataset Suryavanshi)."""
+    s = str(tok).lower().strip()
+    s = s.replace("sooryavanshi", "suryavanshi")
+    s = s.replace("soorya", "surya")
+    return s
+
+
+def player_names_match(db_name, roster_name):
+    db_p = str(db_name).lower().replace(".", "").split()
+    r_p = str(roster_name).lower().replace(".", "").split()
+    if not db_p or not r_p:
+        return False
+    if _normalize_surname_token(db_p[-1]) != _normalize_surname_token(r_p[-1]):
+        return False
+    if len(db_p) == 1 and len(r_p) == 1:
+        return db_p[0] == r_p[0]
+    db_first = db_p[0]
+    r_first = r_p[0]
+    if db_first == r_first:
+        return True
+    if len(db_p) == 2 and len(r_p) == 2:
+        if len(db_first) <= 2 and db_first[0] == r_first[0]:
+            return True
+        if len(r_first) <= 2 and db_first[0] == r_first[0]:
+            return True
+        if len(db_first) == 1 and len(r_first) > 1 and r_first.startswith(db_first):
+            return True
+        if len(r_first) == 1 and len(db_first) > 1 and db_first.startswith(r_first):
+            return True
+    elif len(db_p) > 2 or len(r_p) > 2:
+        db_in = "".join([w[0] for w in db_p[:-1]])
+        r_in = "".join([w[0] for w in r_p[:-1]])
+        if db_in == r_in:
+            return True
+        if len(db_in) <= 2 and len(r_in) > 0 and db_in[0] == r_in[0]:
+            return True
+    if len(db_p) >= 2 and len(r_p) >= 2:
+        a, b = db_p[0], r_p[0]
+        if len(a) == len(b) and len(a) >= 4 and sum(c1 != c2 for c1, c2 in zip(a, b)) <= 1:
+            return True
+    db_full = " " + " ".join(db_p) + " "
+    r_full = " " + " ".join(r_p) + " "
+    return db_full in r_full or r_full in db_full
+
+
+def resolve_df_player_name(request_name: str) -> str:
+    if df is None or not request_name:
+        return request_name
+    if not df[df["player_name"] == request_name].empty:
+        return request_name
+    for pn in df["player_name"].unique():
+        if player_names_match(request_name, str(pn)):
+            return str(pn)
+    return request_name
+
+
+def _opponent_names_equivalent(hist_name: str, schedule_name: str) -> bool:
+    a = str(hist_name).replace("Bengaluru", "Bangalore").strip().lower()
+    b = str(schedule_name).replace("Bengaluru", "Bangalore").strip().lower()
+    return a == b
+
 
 @app.on_event("startup")
 def load_data():
-    global df, bbb_matchups
+    global df, bbb_matchups, ipl2026_player_match, ipl2026_xi_by_team, upcoming_match_meta, merged_team_rosters
     import glob
     import re
     
@@ -81,7 +393,12 @@ def load_data():
         df = pd.read_csv(old_data_path, low_memory=False)
     else:
         return
-        
+
+    project_root = os.path.join(os.path.dirname(__file__), "..")
+    global venue_avg_batting_one_side, venue_avg_phase
+    venue_avg_batting_one_side = load_venue_batting_averages(project_root)
+    venue_avg_phase = build_venue_phase_averages(df)
+    
     # 1. Standardizations
     role_map = {"BAT": "BAT", "WKB": "WK", "BOWL": "BOWL", "AR": "AR", "WK": "WK"}
     if 'player_role_platform' in df.columns:
@@ -128,28 +445,61 @@ def load_data():
     if 'id' not in df.columns:
         df['id'] = df.index
 
+    project_root = os.path.join(os.path.dirname(__file__), "..")
+    merged_team_rosters = load_merged_team_rosters(project_root)
+
+    bb2026 = os.path.join(project_root, "IPL_2026", "ipl_2026_deliveries.csv")
+    ipl2026_player_match, ipl2026_xi_by_team = build_ipl2026_aggregates(bb2026)
+
+    upcoming_path_meta = os.path.join(project_root, "data", "upcoming_matches.csv")
+    upcoming_match_meta = {}
+    if os.path.exists(upcoming_path_meta):
+        udf = pd.read_csv(upcoming_path_meta)
+        for _, r in udf.iterrows():
+            mnum = r.get("match_num")
+            upcoming_match_meta[str(r["match_id"])] = {
+                "match_num": int(mnum) if pd.notna(mnum) else None,
+                "status": str(r.get("status", "")),
+                "team1": str(r["team1"]),
+                "team2": str(r["team2"]),
+                "venue": str(r.get("venue", "Unknown")),
+            }
+
 @app.get("/matches")
 def get_matches():
     res = []
-    
     upcoming_path = os.path.join(os.path.dirname(__file__), "..", "data", "upcoming_matches.csv")
     if os.path.exists(upcoming_path):
         import csv
+        from datetime import datetime
+
+        today = datetime.now().date()
         with open(upcoming_path, mode='r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
+                match_date_str = str(row['date'])
+                status = str(row['status'])
+
+                # Automatically mark past matches as completed
+                try:
+                    match_date_obj = datetime.strptime(match_date_str, "%Y-%m-%d").date()
+                    if match_date_obj < today:
+                        status = "completed"
+                except ValueError:
+                    pass
+
                 res.append({
                     "match_id": str(row['match_id']),
                     "team1": str(row['team1']),
                     "team2": str(row['team2']),
-                    "date": str(row['date']),
+                    "date": match_date_str,
                     "venue": str(row['venue']),
-                    "status": str(row['status'])
+                    "status": status
                 })
         # If we have the active 2026 schedule, return it reversed so latest are at top
         res.reverse()
         return res
-        
+
     # Full fallback if 2026 tracking not running
     if df is not None:
         matches_meta = df.drop_duplicates(subset=['match_id']).copy()
@@ -171,12 +521,62 @@ def get_match_context(match_id: str):
     
     match_data = df[df['match_id'].astype(str) == str(match_id)]
     if match_data.empty:
-        return {}
+        upcoming = upcoming_match_meta.get(str(match_id), {})
+        venue = upcoming.get('venue')
+        if not venue:
+            return {}
+
+        venue_key = normalize_venue_name(venue)
+        venue_simple = simplify_venue_name(venue)
+        avg_data = venue_avg_phase.get(venue_key) or venue_avg_phase.get(venue_simple)
+        if avg_data is None:
+            for known_key, known_data in venue_avg_phase.items():
+                if venue_simple in known_key or known_key in venue_simple:
+                    avg_data = known_data
+                    break
+
+        if avg_data is not None:
+            return {
+                "venueAvg": int(round(avg_data.get('venue_avg_total_runs_before', 320) / 2)),
+                "ppAvg": int(avg_data.get('venue_avg_powerplay_runs_before', 90) / 2),
+                "moAvg": int(avg_data.get('venue_avg_middle_overs_runs_before', 150) / 2),
+                "doAvg": int(avg_data.get('venue_avg_death_overs_runs_before', 80) / 2)
+            }
+
+        avg_one_side = venue_avg_batting_one_side.get(venue_key)
+        if avg_one_side is None:
+            avg_one_side = venue_avg_batting_one_side.get(venue_simple)
+        if avg_one_side is None:
+            for known_key, known_avg in venue_avg_batting_one_side.items():
+                if venue_simple in known_key or known_key in venue_simple:
+                    avg_one_side = known_avg
+                    break
+        if avg_one_side is None:
+            return {}
+
+        return {
+            "venueAvg": int(round(avg_one_side)),
+            "ppAvg": 45,
+            "moAvg": 75,
+            "doAvg": 40
+        }
 
     first_row = match_data.iloc[0]
-    
+    venue_key = normalize_venue_name(first_row.get('venue', 'Unknown'))
+    venue_simple = simplify_venue_name(first_row.get('venue', 'Unknown'))
+    avg_one_side = venue_avg_batting_one_side.get(venue_key)
+    if avg_one_side is None:
+        avg_one_side = venue_avg_batting_one_side.get(venue_simple)
+    if avg_one_side is None:
+        for known_key, known_avg in venue_avg_batting_one_side.items():
+            if venue_simple in known_key or known_key in venue_simple:
+                avg_one_side = known_avg
+                break
+    if avg_one_side is None:
+        avg_one_side = first_row.get('venue_avg_total_runs_before', 320) / 2
+
     return {
-        "venueAvg": int(first_row.get('venue_avg_total_runs_before', 320) / 2),
+        "venueAvg": int(round(avg_one_side)),
         "ppAvg": int(first_row.get('venue_avg_powerplay_runs_before', 90) / 2),
         "moAvg": int(first_row.get('venue_avg_middle_overs_runs_before', 150) / 2),
         "doAvg": int(first_row.get('venue_avg_death_overs_runs_before', 80) / 2)
@@ -199,8 +599,8 @@ def get_squad_data(match_id: str):
                 reader = csv.DictReader(f)
                 for row in reader:
                     if str(row['match_id']) == str(match_id):
-                        t1 = row['team1']
-                        t2 = row['team2']
+                        t1 = row['team1'].replace('Bengaluru', 'Bangalore')
+                        t2 = row['team2'].replace('Bengaluru', 'Bangalore')
                         season = df['season'].max() if 'season' in df.columns else datetime.now().year
                         break
         if not t1:
@@ -209,15 +609,343 @@ def get_squad_data(match_id: str):
         t1 = this_match['team'].iloc[0]
         t2 = this_match['opponent'].iloc[0]
         season = this_match['season'].iloc[0]
-    
-    squad_data = df[(df['season'] == season) & (df['team'].isin([t1, t2]))]
-    if squad_data.empty:
-        # Relax season constraint if not matching fully
-        squad_data = df[df['team'].isin([t1, t2])]
+
+    meta = upcoming_match_meta.get(str(match_id)) if upcoming_match_meta else None
+    fixture_mno = meta.get("match_num") if meta else None
+    is_fix_upcoming = bool(meta and str(meta.get("status", "")).lower() == "upcoming")
+    if fixture_mno is None and ipl2026_xi_by_team:
+        all_match_nums = [n for d in ipl2026_xi_by_team.values() for n in d.keys()]
+        fixture_mno = max(all_match_nums) + 1 if all_match_nums else None
+
+    def count_ipl26_appearances(player_name: str, franchise: str) -> int:
+        if ipl2026_player_match is None or ipl2026_player_match.empty:
+            return 0
+        sub = ipl2026_player_match[ipl2026_player_match["player"].apply(lambda x: player_names_match(player_name, x))]
+        if sub.empty:
+            return 0
+        if franchise:
+            fts = schedule_team_to_short(franchise)
+            if fts:
+                sub = sub[sub["team_short"] == fts]
+        if sub.empty:
+            return 0
+        if fixture_mno is None:
+            return int(len(sub))
+        if is_fix_upcoming:
+            sub = sub[sub["match_no"] < int(fixture_mno)]
+        else:
+            sub = sub[sub["match_no"] <= int(fixture_mno)]
+        return int(len(sub))
+
+    def is_expected_or_active_player(player_name: str, franchise: str) -> bool:
+        # Check if player has appeared in IPL 2026
+        if count_ipl26_appearances(player_name, franchise) >= 1:
+            return True
+        return False
+
+    squad_json_path = os.path.join(os.path.dirname(__file__), "..", "data", "2026_active_squads.json")
+    modern_squads = merged_team_rosters if merged_team_rosters else {}
+    if not modern_squads and os.path.exists(squad_json_path):
+        import json
+        with open(squad_json_path, "r", encoding="utf-8") as f:
+            modern_squads = json.load(f)
+
+    # Use expected XI if available, else modern_squads
+    if ipl2026_xi_by_team:
+        expected_t1 = expected_xi_for_franchise(ipl2026_xi_by_team, t1, fixture_mno or 1)
+        expected_t2 = expected_xi_for_franchise(ipl2026_xi_by_team, t2, fixture_mno or 1)
+        t1_players = list(expected_t1) if expected_t1 else (modern_squads.get(resolve_franchise_squad_key(t1, modern_squads), []) if modern_squads else [])
+        t2_players = list(expected_t2) if expected_t2 else (modern_squads.get(resolve_franchise_squad_key(t2, modern_squads), []) if modern_squads else [])
+    else:
+        if modern_squads:
+            k1 = resolve_franchise_squad_key(t1, modern_squads)
+            k2 = resolve_franchise_squad_key(t2, modern_squads)
+            t1_players = modern_squads.get(k1, []) if k1 else []
+            t2_players = modern_squads.get(k2, []) if k2 else []
+        else:
+            t1_players = []
+            t2_players = []
         
-    unique_players = squad_data.sort_values('match_date').drop_duplicates(subset=['player_name'], keep='last').copy()
-    unique_players = unique_players[unique_players['team'].isin([t1, t2])]
+    unique_players = df.sort_values('match_date').drop_duplicates(subset=['player_name'], keep='last').copy()
+
+    def determine_modern_team(p_name):
+        for m in t1_players:
+            if player_names_match(p_name, m):
+                return t1
+        for m in t2_players:
+            if player_names_match(p_name, m):
+                return t2
+        return None
+        
+    unique_players['modern_team'] = unique_players['player_name'].apply(determine_modern_team)
+    unique_players = unique_players[unique_players['modern_team'].notna()].copy()
+    
+    active_flags = []
+    for p in unique_players["player_name"]:
+        is_withdrawn = any(player_names_match(p, w) for w in WITHDRAWAL_2026)
+        active_flags.append(not is_withdrawn)
+        
+    unique_players = unique_players[active_flags].copy()
+    
+    unique_players["team"] = unique_players["modern_team"]  # Teleport injection
+    unique_players = append_roster_only_players(
+        unique_players, t1, t2, t1_players, t2_players, df
+    )
+
+    if not unique_players.empty:
+        unique_players['is_probably_playing'] = unique_players.apply(
+            lambda row: is_expected_or_active_player(str(row['player_name']), str(row['team'])),
+            axis=1,
+        )
+    else:
+        unique_players['is_probably_playing'] = []
+
+    # Phase 3 — IPL 2026 form: last-5 proxy vs earlier 2026 games + model projection (full squad stays visible)
+    unique_players['is_truly_hot'] = False
+    before_mno = int(fixture_mno) if (is_fix_upcoming and fixture_mno is not None) else None
+
+    season_l5_line = None
+    if ipl2026_player_match is not None and not ipl2026_player_match.empty:
+        season_l5_line = ipl2026_season_l5_percentile_line(
+            ipl2026_player_match, before_match_num=before_mno
+        )
+
+    for idx, row in unique_players.iterrows():
+        p_name = row['player_name']
+        p_hist = df[df['player_name'] == p_name].sort_values('match_date').tail(5)
+        legacy_l5 = p_hist['proj_points'].mean() if len(p_hist) > 0 else float(row['proj_points'])
+
+        proj = float(row['proj_points'])
+        fctx = {"l5": None, "prior": None, "n": 0}
+        sub26 = pd.DataFrame()
+        if ipl2026_player_match is not None and not ipl2026_player_match.empty:
+            fctx = ipl2026_form_context(
+                ipl2026_player_match,
+                p_name,
+                player_names_match,
+                before_match_num=before_mno,
+                franchise_schedule_name=str(row["team"]),
+            )
+            sub26 = ipl2026_player_match[
+                ipl2026_player_match["player"].apply(lambda x: player_names_match(p_name, x))
+            ]
+            fts = schedule_team_to_short(str(row["team"]))
+            if fts:
+                sub26 = sub26[sub26["team_short"] == fts]
+            if before_mno is not None:
+                sub26 = sub26[sub26["match_no"] < before_mno]
+
+        l5_avg = float(fctx["l5"]) if fctx.get("l5") is not None else legacy_l5
+        n26 = int(fctx.get("n") or 0)
+        l5v = fctx.get("l5")
+        priorv = fctx.get("prior")
+        has_form_sample = (len(sub26) >= 1) or (len(p_hist) >= 1)
+
+        if modern_squads:
+            is_active_2026 = True
+        else:
+            live_stats_path = os.path.join(os.path.dirname(__file__), "..", "data", "2026_live_stats.json")
+            if os.path.exists(live_stats_path):
+                import json
+                with open(live_stats_path, "r", encoding="utf-8") as f:
+                    live_stats = json.load(f)
+                is_active_2026 = any(player_names_match(p_name, lp) for lp in live_stats.keys())
+            else:
+                is_active_2026 = True
+
+        ipl_loaded = ipl2026_player_match is not None and not ipl2026_player_match.empty
+        hot = False
+        boost = 0.0
+        if ipl_loaded:
+            # Hot form / bumps only from real IPL 2026 participation (on-field rows), min 2 games for trend.
+            # Also tag 'standout' season performers when L5 is in the top tier league-wide but proj is stale.
+            if is_active_2026 and n26 >= 2 and l5v is not None:
+                thr = proj * 0.88
+                if priorv is not None:
+                    thr = max(thr, float(priorv) * 1.04)
+                season_standout = (
+                    season_l5_line is not None
+                    and float(l5v) >= season_l5_line
+                    and float(l5v) > proj * 0.84
+                )
+                if float(l5v) > thr or season_standout:
+                    hot = True
+                    raw = (float(l5v) - proj) * 0.62
+                    boost = max(-14.0, min(20.0, raw))
+        else:
+            if is_active_2026 and has_form_sample and (l5v is None or n26 < 2):
+                if l5_avg > proj * 0.93 and len(p_hist) >= 1:
+                    hot = True
+                    raw = (l5_avg - proj) * 0.52
+                    boost = max(-12.0, min(16.0, raw))
+
+        if hot and boost != 0.0:
+            unique_players.at[idx, "proj_points"] = proj + boost
+            unique_players.at[idx, "is_truly_hot"] = True
+
     return unique_players
+
+
+def match_data_for_season_realistic_optimizer(match_data: pd.DataFrame, match_id: str) -> pd.DataFrame:
+    """
+    Restrict Dream11 optimization to players who have IPL 2026 on-field minutes before this fixture,
+    or who appear in the latest expected XI from ball-by-ball (so bench / unused squad don't fill the 11).
+    Falls back to full squad if the filter would leave fewer than 11 options.
+    """
+    if match_data.empty:
+        return match_data
+    if "is_probably_playing" in match_data.columns:
+        active_pool = match_data[match_data["is_probably_playing"] == True].copy()
+        if len(active_pool) >= 11:
+            return active_pool.reset_index(drop=True)
+
+    if ipl2026_player_match is None or ipl2026_player_match.empty:
+        return match_data
+    if not ipl2026_xi_by_team:
+        return match_data
+    meta = upcoming_match_meta.get(str(match_id)) if upcoming_match_meta else None
+    if not meta or meta.get("match_num") is None:
+        return match_data
+    fm = int(meta["match_num"])
+    is_up = str(meta.get("status", "")).lower() == "upcoming"
+
+    def eligible(row):
+        franchise = str(row["team"])
+        p = row["player_name"]
+        nplay = ipl2026_onfield_appearances_before_fixture(
+            ipl2026_player_match,
+            p,
+            player_names_match,
+            fm,
+            is_up,
+            franchise_schedule_name=franchise,
+        )
+        if nplay >= 1:
+            return True
+        xi_fr = expected_xi_for_franchise(ipl2026_xi_by_team, franchise, fm)
+        if xi_fr and any(player_names_match(p, x) for x in xi_fr):
+            return True
+        return False
+
+    narrowed = match_data[match_data.apply(eligible, axis=1)]
+    if len(narrowed) >= 11:
+        return narrowed
+    return match_data
+
+
+def _infer_bowling_style(player_name: str, role: str) -> str:
+    """Stable pace vs spin label for BOWL/AR when we have no bowling-type column (pitch/weather tuning)."""
+    if role not in ("BOWL", "AR"):
+        return "neutral"
+    h = hashlib.md5(str(player_name).encode("utf-8")).hexdigest()
+    v = int(h[:12], 16) % 100
+    return "spin" if v < 43 else "pace"
+
+
+def _is_batting_first_team(team: str, batting_first_team: Optional[str]) -> bool:
+    if not batting_first_team or batting_first_team.upper().strip() in ("NONE", ""):
+        return False
+    b = batting_first_team.upper().strip()
+    t = str(team).upper().strip()
+    parts = str(team).split()
+    abbr = "".join(p[0] for p in parts)[:3].upper() if parts else ""
+    return t == b or abbr == b
+
+
+def lineup_context_multiplier(
+    role: str,
+    player_name: str,
+    team: str,
+    pitch_type: Optional[str],
+    weather_condition: Optional[str],
+    batting_first_team: Optional[str],
+) -> float:
+    """
+    Multiplicative adjustment to projected points for pitch (pace/spin friendly),
+    weather (clear / overcast / dew), and toss (who bats first).
+    """
+    style = _infer_bowling_style(player_name, role)
+    is_bat_first = _is_batting_first_team(team, batting_first_team)
+
+    pitch = (pitch_type or "Neutral").strip()
+    weather = (weather_condition or "Clear").strip()
+
+    m = 1.0
+
+    # Toss: first innings slightly favours top-order batters; second innings favours bowlers a touch
+    if batting_first_team and batting_first_team.upper().strip() not in ("NONE", ""):
+        if is_bat_first:
+            if role in ("BAT", "AR", "WK"):
+                m *= 1.05
+        else:
+            if role == "BOWL":
+                m *= 1.05
+            elif role == "AR":
+                m *= 1.03
+
+    # Pitch
+    if pitch == "Pace":
+        if role == "BAT":
+            m *= 1.06
+        elif role == "WK":
+            m *= 1.06
+        elif role == "BOWL":
+            if style == "pace":
+                m *= 1.15
+            elif style == "spin":
+                m *= 0.87
+            else:
+                m *= 1.04
+        elif role == "AR":
+            if style == "pace":
+                m *= 1.11
+            elif style == "spin":
+                m *= 0.91
+            else:
+                m *= 1.04
+    elif pitch == "Spin":
+        if role == "BAT":
+            m *= 0.96
+        elif role == "WK":
+            m *= 0.97
+        elif role == "BOWL":
+            if style == "spin":
+                m *= 1.17
+            elif style == "pace":
+                m *= 0.85
+            else:
+                m *= 1.03
+        elif role == "AR":
+            if style == "spin":
+                m *= 1.13
+            elif style == "pace":
+                m *= 0.89
+            else:
+                m *= 1.04
+
+    # Weather (stacks with pitch)
+    if weather == "Overcast":
+        if role in ("BOWL", "AR"):
+            if style == "pace":
+                m *= 1.10
+            elif style == "spin":
+                m *= 0.95
+            else:
+                m *= 1.03
+        else:
+            m *= 0.98
+        if not is_bat_first and role in ("BOWL", "AR") and style == "pace":
+            m *= 1.05
+    elif weather == "Dew":
+        if is_bat_first and role in ("BOWL", "AR"):
+            m *= 0.86
+        if not is_bat_first and role in ("BAT", "WK"):
+            m *= 1.10
+        if is_bat_first and role in ("BAT", "WK"):
+            m *= 1.03
+
+    return m
+
 
 @app.get("/players/{match_id}")
 def get_players(match_id: str):
@@ -231,9 +959,7 @@ def get_players(match_id: str):
         team_parts = str(row['team']).split()
         team_abbr = "".join([t[0] for t in team_parts])[:3].upper() if team_parts else "UNK"
         
-        runs = row.get('runs_scored', 0)
-        wkts = row.get('wickets', 0)
-        is_hot = (pd.notna(runs) and float(runs) > 40) or (pd.notna(wkts) and float(wkts) >= 2)
+        is_hot = row.get('is_truly_hot', False)
 
         results.append({
             "id": int(row['id']),
@@ -258,9 +984,44 @@ def get_players(match_id: str):
 def get_player_stats(match_id: str, player_name: str):
     if df is None:
         return []
-    
+
+    meta = upcoming_match_meta.get(str(match_id)) if upcoming_match_meta else None
+    before_mno = int(meta["match_num"]) if meta and str(meta.get("status", "")).lower() == "upcoming" and meta.get("match_num") is not None else None
+
+    if ipl2026_player_match is not None and not ipl2026_player_match.empty:
+        r26 = ipl2026_recent_matches_for_player(
+            ipl2026_player_match, player_name, player_names_match, 12
+        )
+        if before_mno is not None:
+            r26 = r26[r26["match_no"] < before_mno]
+        r26 = r26.tail(5)
+        if not r26.empty:
+            stats = []
+            for _, row in r26.iterrows():
+                opp_s = str(row.get("opponent_short") or "")
+                opp_label = SHORT_TO_SCHEDULE_NAME.get(opp_s, opp_s) if opp_s else "—"
+                runs = int(row.get("runs_bat") or 0)
+                balls = int(row.get("balls_bat") or 0)
+                sr = round(100.0 * runs / balls, 2) if balls > 0 else 0.0
+                bbowl = float(row.get("balls_bowl") or 0)
+                rconc = float(row.get("runs_conceded") or 0)
+                econ = round(rconc / (bbowl / 6.0), 2) if bbowl > 0 else 0.0
+                stats.append({
+                    "match_date": f"IPL 2026 · Match {int(row['match_no'])}",
+                    "opponent": opp_label,
+                    "runs_scored": runs,
+                    "wickets": int(row.get("wickets", 0) or 0),
+                    "strike_rate": sr,
+                    "fantasy_points": float(row.get("fantasy_proxy", 0)),
+                    "boundary_runs": 0,
+                    "non_boundary_runs": 0,
+                    "economy": econ,
+                    "balls_bowled": int(row.get("balls_bowl", 0) or 0),
+                })
+            return stats
+
     player_data = df[df['player_name'] == player_name].sort_values('match_date').tail(5)
-    
+
     stats = []
     for _, row in player_data.iterrows():
         stats.append({
@@ -281,25 +1042,49 @@ def get_player_stats(match_id: str, player_name: str):
 def get_matchup_stats(match_id: str, player_name: str):
     if df is None:
         return {"error": "Dataset not loaded"}
-    
-    # 1. Figure out tonight's opponent
+
+    p_name_hist = resolve_df_player_name(player_name)
+
+    # 1. Figure out tonight's opponent (historical match row OR 2026 schedule + squad)
     match_meta = df[df['match_id'].astype(str) == str(match_id)]
-    if match_meta.empty:
-        return {"error": "Match not found"}
-        
-    t1 = match_meta['team'].iloc[0]
-    t2 = match_meta['opponent'].iloc[0]
-    
-    # Check which team the player belongs to in tonight's match
-    player_tonight = match_meta[match_meta['player_name'] == player_name]
-    if player_tonight.empty:
-        return {"error": "Player not found in this match"}
-        
-    p_team = player_tonight['team'].iloc[0]
+    if not match_meta.empty:
+        t1 = match_meta['team'].iloc[0]
+        t2 = match_meta['opponent'].iloc[0]
+        player_tonight = match_meta[match_meta['player_name'] == p_name_hist]
+        if player_tonight.empty:
+            return {"error": "Player not found in this match"}
+        p_team = player_tonight['team'].iloc[0]
+    else:
+        meta = upcoming_match_meta.get(str(match_id)) if upcoming_match_meta else None
+        if not meta:
+            return {"error": "Match not found"}
+        t1 = meta["team1"].replace("Bengaluru", "Bangalore")
+        t2 = meta["team2"].replace("Bengaluru", "Bangalore")
+        squad_json_path = os.path.join(os.path.dirname(__file__), "..", "data", "2026_active_squads.json")
+        p_team = None
+        if os.path.exists(squad_json_path):
+            import json
+            with open(squad_json_path, "r") as f:
+                squads = json.load(f)
+            for roster_name in squads.get(t1, []):
+                if player_names_match(player_name, roster_name):
+                    p_team = t1
+                    break
+            if p_team is None:
+                for roster_name in squads.get(t2, []):
+                    if player_names_match(player_name, roster_name):
+                        p_team = t2
+                        break
+        if p_team is None:
+            return {"error": "Player not found in this match"}
+
     p_opponent = t2 if p_team == t1 else t1
-    
-    # 2. Get history ONLY against this specific franchise across all seasons
-    h2h_data = df[(df['player_name'] == player_name) & (df['opponent'] == p_opponent)]
+
+    # 2. Get history ONLY against this specific franchise across all seasons (full historical df)
+    h2h_data = df[
+        (df["player_name"] == p_name_hist)
+        & (df["opponent"].apply(lambda o: _opponent_names_equivalent(o, p_opponent)))
+    ]
     
     total_runs = h2h_data['runs_scored'].sum()
     total_balls = h2h_data['balls_faced'].sum()
@@ -307,13 +1092,19 @@ def get_matchup_stats(match_id: str, player_name: str):
     total_wickets = h2h_data['wickets'].sum()
     avg_fantasy = h2h_data['proj_points'].mean() if len(h2h_data) > 0 else 0
     
-    # Micro Matchups (Batter vs Bowler)
+    # Micro Matchups (Batter vs Bowler) — legacy ball-by-ball file; names align with historical dataset
     micro = []
     if bbb_matchups is not None:
         opp_squad = df[(df['match_id'].astype(str) == str(match_id)) & (df['team'] == p_opponent)]
+        if opp_squad.empty:
+            sd = get_squad_data(match_id)
+            if not sd.empty:
+                opp_squad = sd[sd["team"] == p_opponent]
         opp_bowlers = opp_squad[opp_squad['Role'].isin(['BOWL', 'AR'])]['player_name'].tolist()
-        
-        filtered_bbb = bbb_matchups[(bbb_matchups['batter'] == player_name) & (bbb_matchups['bowler'].isin(opp_bowlers))]
+
+        filtered_bbb = bbb_matchups[
+            (bbb_matchups['batter'] == p_name_hist) & (bbb_matchups['bowler'].isin(opp_bowlers))
+        ]
         
         for _, r in filtered_bbb.iterrows():
             runs = int(r['runs'])
@@ -345,7 +1136,8 @@ def optimize_lineup(req: OptimizeRequest):
         return {"error": "Dataset not loaded"}
         
     match_data = get_squad_data(req.match_id)
-    
+    match_data = match_data_for_season_realistic_optimizer(match_data, req.match_id)
+
     if len(match_data) < 11:
         return {"error": "Not enough players in this match fixture."}
         
@@ -356,53 +1148,22 @@ def optimize_lineup(req: OptimizeRequest):
         bat_team = None
 
     def adjust_points(row):
-        pts = float(row['proj_points'])
-        team_parts = str(row['team']).split()
-        team_abbr = "".join([t[0] for t in team_parts])[:3].upper() if team_parts else "UNK"
-        
-        is_bat_first = False
-        if bat_team and (team_abbr == bat_team or str(row['team']).upper().strip() == bat_team):
-            is_bat_first = True
+        base = float(row["proj_points"])
+        if not bool(row.get("is_probably_playing", False)):
+            base *= 0.86
+        else:
+            base *= 1.06
+        mult = lineup_context_multiplier(
+            str(row["Role"]),
+            str(row["player_name"]),
+            str(row["team"]),
+            req.pitch_type,
+            req.weather_condition,
+            bat_team,
+        )
+        return base * mult
 
-        role = row['Role']
-        
-        # Determine pseudo bowling style for Spin vs Pace modifiers deterministically
-        # If ID is even -> Pace, If odd -> Spin (approximated for demo purposes)
-        p_id = int(row['id'])
-        is_spin = (p_id % 2 != 0) and role in ['BOWL', 'AR']
-        is_pace = (p_id % 2 == 0) and role in ['BOWL', 'AR']
-
-        # Batting First modifiers
-        if bat_team:
-            if is_bat_first:
-                if role in ['BAT', 'AR', 'WK']:
-                    pts *= 1.05
-            else:
-                if role == 'BOWL':
-                    pts *= 1.05
-                    
-        # Feature 3: Contextual AI Pitch Adjustments
-        if req.pitch_type in ['Pace', 'Spin']:
-            if role in ['BOWL', 'AR']:
-                pts *= 1.10
-            elif role == 'BAT':
-                pts *= 0.95
-                
-        # Feature 3: Contextual AI Weather Adjustments
-        if req.weather_condition == 'Overcast':
-            # Early swing advantage for Team Bowling First (which means they bat second)
-            if not is_bat_first and role in ['BOWL', 'AR']:
-                pts *= 1.10
-        elif req.weather_condition == 'Dew':
-            # Extreme disadvantage for Team Bowling Second (which means they batted first)
-            if is_bat_first and role in ['BOWL', 'AR']:
-                pts *= 0.85
-            # Boost to Team Batting Second as the ball skids to the bat
-            if not is_bat_first and role in ['BAT', 'WK']:
-                pts *= 1.10
-
-        return pts
-    match_data['proj_points'] = match_data.apply(adjust_points, axis=1)
+    match_data["proj_points"] = match_data.apply(adjust_points, axis=1)
         
     # **Knapsack Linear Programming Setup**
     prob = pulp.LpProblem("Dream11_Optimization", pulp.LpMaximize)
@@ -479,14 +1240,17 @@ def optimize_lineup(req: OptimizeRequest):
         prob += pulp.lpSum([player_vars[pid] for pid in optimal_pids]) <= 9
         
         # **C and VC Assignment Strategy**
-        # Sort the optimal 11 descending by their pure projected points.
+        # Sort the optimal 11 descending by projected points and use unique IDs.
         optimal_players_df = match_data[match_data['id'].isin(optimal_pids)].copy()
-        optimal_players_df = optimal_players_df.sort_values('proj_points', ascending=False)
+        optimal_players_df = optimal_players_df.sort_values(
+            by=["proj_points"], ascending=False
+        ).drop_duplicates(subset=["id"])
 
         top_pid = None
         vc_pid = None
-        if len(optimal_players_df) >= 2:
+        if len(optimal_players_df) >= 1:
             top_pid = optimal_players_df.iloc[0]['id']
+        if len(optimal_players_df) >= 2:
             vc_pid = optimal_players_df.iloc[1]['id']
 
         # Finalize payload mapping for this lineup
@@ -500,9 +1264,7 @@ def optimize_lineup(req: OptimizeRequest):
             team_parts = str(row['team']).split()
             team_abbr = "".join([t[0] for t in team_parts])[:3].upper() if team_parts else "UNK"
 
-            runs = row.get('runs_scored', 0)
-            wkts = row.get('wickets', 0)
-            is_hot = (pd.notna(runs) and float(runs) > 40) or (pd.notna(wkts) and float(wkts) >= 2)
+            is_hot = bool(row.get("is_truly_hot", False))
 
             results.append({
                 "id": int(pid),
@@ -519,7 +1281,8 @@ def optimize_lineup(req: OptimizeRequest):
                 "form_tag": "hot" if is_hot else "none",
                 "isOptimal": bool(is_opt),
                 "isCaptain": bool(is_cap),
-                "isViceCaptain": bool(is_vc)
+                "isViceCaptain": bool(is_vc),
+                "isPlayingCandidate": bool(row.get("is_probably_playing", False))
             })
             
         all_lineups.append(results)
