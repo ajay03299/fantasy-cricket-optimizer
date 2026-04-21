@@ -59,6 +59,9 @@ upcoming_match_meta = {}
 merged_team_rosters = None
 venue_avg_batting_one_side = {}
 venue_avg_phase = {}
+h2h_lookup = {}
+player_name_lower_lookup = {}
+player_names_by_surname = {}
 
 
 def normalize_venue_name(venue: str) -> str:
@@ -333,7 +336,12 @@ def resolve_df_player_name(request_name: str) -> str:
         return request_name
     if not df[df["player_name"] == request_name].empty:
         return request_name
-    for pn in df["player_name"].unique():
+    lowered = str(request_name).strip().lower()
+    if lowered in player_name_lower_lookup:
+        return player_name_lower_lookup[lowered]
+    surname_bucket = player_names_by_surname.get(_surname_key(request_name), [])
+    candidates = surname_bucket if surname_bucket else df["player_name"].unique()
+    for pn in candidates:
         if player_names_match(request_name, str(pn)):
             return str(pn)
     return request_name
@@ -345,9 +353,49 @@ def _opponent_names_equivalent(hist_name: str, schedule_name: str) -> bool:
     return a == b
 
 
+def _normalize_team_name_for_lookup(team_name: str) -> str:
+    return str(team_name).replace("Bengaluru", "Bangalore").strip().lower()
+
+
+def _surname_key(name: str) -> str:
+    parts = str(name).lower().replace(".", "").split()
+    return _normalize_surname_token(parts[-1]) if parts else ""
+
+
+def _build_h2h_lookup_table(hist_df: pd.DataFrame) -> dict:
+    req_cols = {"player_name", "opponent_norm", "runs_scored", "balls_faced", "wickets"}
+    if hist_df is None or hist_df.empty or not req_cols.issubset(hist_df.columns):
+        return {}
+    if "proj_points" not in hist_df.columns:
+        return {}
+
+    h2h = (
+        hist_df.groupby(["player_name", "opponent_norm"], dropna=False)
+        .agg(
+            matches_played=("player_name", "size"),
+            total_runs=("runs_scored", "sum"),
+            total_balls=("balls_faced", "sum"),
+            total_wickets=("wickets", "sum"),
+            avg_fantasy_points=("proj_points", "mean"),
+        )
+        .reset_index()
+    )
+    return {
+        (str(r["player_name"]), str(r["opponent_norm"])): {
+            "matches_played": int(r["matches_played"]),
+            "total_runs": int(r["total_runs"]) if pd.notna(r["total_runs"]) else 0,
+            "total_balls": int(r["total_balls"]) if pd.notna(r["total_balls"]) else 0,
+            "total_wickets": int(r["total_wickets"]) if pd.notna(r["total_wickets"]) else 0,
+            "avg_fantasy_points": float(r["avg_fantasy_points"]) if pd.notna(r["avg_fantasy_points"]) else 0.0,
+        }
+        for _, r in h2h.iterrows()
+    }
+
+
 @app.on_event("startup")
 def load_data():
     global df, bbb_matchups, ipl2026_player_match, ipl2026_xi_by_team, upcoming_match_meta, merged_team_rosters
+    global h2h_lookup, player_name_lower_lookup, player_names_by_surname
     import glob
     import re
     
@@ -399,6 +447,22 @@ def load_data():
     else:
         return
 
+    # Precompute lookup indexes used by latency-sensitive endpoints.
+    if "opponent" in df.columns:
+        df["opponent_norm"] = df["opponent"].map(_normalize_team_name_for_lookup)
+
+    if "player_name" in df.columns:
+        player_name_lower_lookup = {
+            str(pn).strip().lower(): str(pn) for pn in df["player_name"].dropna().unique()
+        }
+        player_names_by_surname = {}
+        for pn in df["player_name"].dropna().unique():
+            key = _surname_key(str(pn))
+            if key:
+                player_names_by_surname.setdefault(key, []).append(str(pn))
+
+    h2h_lookup = {}
+
     project_root = os.path.join(os.path.dirname(__file__), "..")
     global venue_avg_batting_one_side, venue_avg_phase
     venue_avg_batting_one_side = load_venue_batting_averages(project_root)
@@ -417,6 +481,8 @@ def load_data():
     elif 'proj_points' not in df.columns:
         # Deterministic fallback if not explicit
         df['proj_points'] = df.index.map(lambda x: 20.0 + (x % 50))
+
+    h2h_lookup = _build_h2h_lookup_table(df)
         
     # 2. Credits should be based on player's overall historical stature, NOT tonight's prediction!
     if 'credits' not in df.columns:
@@ -722,7 +788,7 @@ def get_squad_data(match_id: str):
     else:
         unique_players['is_probably_playing'] = []
 
-    # Phase 3 — IPL 2026 form: last-5 proxy vs earlier 2026 games + model projection (full squad stays visible)
+    # Phase 3 — IPL 2026 form: role-aware hot form based on real 2026 match involvement.
     unique_players['is_truly_hot'] = False
     before_mno = int(fixture_mno) if (is_fix_upcoming and fixture_mno is not None) else None
 
@@ -734,10 +800,11 @@ def get_squad_data(match_id: str):
 
     for idx, row in unique_players.iterrows():
         p_name = row['player_name']
+        role = str(row.get("Role", "AR"))
         p_hist = df[df['player_name'] == p_name].sort_values('match_date').tail(5)
         legacy_l5 = p_hist['proj_points'].mean() if len(p_hist) > 0 else float(row['proj_points'])
-
         proj = float(row['proj_points'])
+
         fctx = {"l5": None, "prior": None, "n": 0}
         sub26 = pd.DataFrame()
         if ipl2026_player_match is not None and not ipl2026_player_match.empty:
@@ -756,12 +823,12 @@ def get_squad_data(match_id: str):
                 sub26 = sub26[sub26["team_short"] == fts]
             if before_mno is not None:
                 sub26 = sub26[sub26["match_no"] < before_mno]
+            sub26 = sub26.sort_values("match_no")
 
         l5_avg = float(fctx["l5"]) if fctx.get("l5") is not None else legacy_l5
         n26 = int(fctx.get("n") or 0)
         l5v = fctx.get("l5")
         priorv = fctx.get("prior")
-        has_form_sample = (len(sub26) >= 1) or (len(p_hist) >= 1)
 
         if modern_squads:
             is_active_2026 = True
@@ -775,31 +842,51 @@ def get_squad_data(match_id: str):
             else:
                 is_active_2026 = True
 
-        ipl_loaded = ipl2026_player_match is not None and not ipl2026_player_match.empty
         hot = False
         boost = 0.0
-        if ipl_loaded:
-            # Hot form / bumps only from real IPL 2026 participation (on-field rows), min 2 games for trend.
-            # Also tag 'standout' season performers when L5 is in the top tier league-wide but proj is stale.
-            if is_active_2026 and n26 >= 2 and l5v is not None:
-                thr = proj * 0.88
-                if priorv is not None:
-                    thr = max(thr, float(priorv) * 1.04)
-                season_standout = (
-                    season_l5_line is not None
-                    and float(l5v) >= season_l5_line
-                    and float(l5v) > proj * 0.84
-                )
-                if float(l5v) > thr or season_standout:
-                    hot = True
-                    raw = (float(l5v) - proj) * 0.62
-                    boost = max(-14.0, min(20.0, raw))
+        if ipl2026_player_match is not None and not ipl2026_player_match.empty and is_active_2026 and n26 >= 2 and l5v is not None:
+            tail3 = sub26.tail(min(3, len(sub26)))
+            r3_runs = float(tail3["runs_bat"].sum()) if not tail3.empty else 0.0
+            r3_wkts = float(tail3["wickets"].sum()) if not tail3.empty else 0.0
+            r3_balls_bat = float(tail3["balls_bat"].sum()) if not tail3.empty else 0.0
+            r3_balls_bowl = float(tail3["balls_bowl"].sum()) if not tail3.empty else 0.0
+            r3_runs_con = float(tail3["runs_conceded"].sum()) if not tail3.empty else 0.0
+
+            r3_sr = (r3_runs / r3_balls_bat * 100.0) if r3_balls_bat > 0 else 0.0
+            r3_econ = (r3_runs_con / (r3_balls_bowl / 6.0)) if r3_balls_bowl > 0 else 99.0
+            l5_delta = float(l5v) - float(priorv) if priorv is not None else max(0.0, float(l5v) - proj * 0.9)
+            season_standout = season_l5_line is not None and float(l5v) >= float(season_l5_line)
+
+            bat_hot = (r3_runs >= 85.0) or (r3_sr >= 145.0 and r3_balls_bat >= 35.0)
+            bowl_hot = (r3_wkts >= 4.0) or (r3_balls_bowl >= 18.0 and r3_econ <= 7.2 and r3_wkts >= 2.0)
+            ar_hot = (r3_runs >= 55.0 and r3_wkts >= 2.0) or (bat_hot and bowl_hot)
+
+            role_hot = False
+            if role in ("BAT", "WK"):
+                role_hot = bat_hot
+            elif role == "BOWL":
+                role_hot = bowl_hot
+            else:
+                role_hot = ar_hot or bat_hot or bowl_hot
+
+            trend_hot = (float(l5v) >= proj * 0.92 and l5_delta >= 4.0) or season_standout
+
+            if role_hot and trend_hot:
+                hot = True
+                raw = (float(l5v) - proj) * 0.58
+                if role in ("BAT", "WK") and bat_hot:
+                    raw += 2.0
+                elif role == "BOWL" and bowl_hot:
+                    raw += 2.0
+                elif role == "AR" and (ar_hot or (bat_hot and bowl_hot)):
+                    raw += 3.0
+                boost = max(-10.0, min(24.0, raw))
         else:
-            if is_active_2026 and has_form_sample and (l5v is None or n26 < 2):
-                if l5_avg > proj * 0.93 and len(p_hist) >= 1:
-                    hot = True
-                    raw = (l5_avg - proj) * 0.52
-                    boost = max(-12.0, min(16.0, raw))
+            # Fallback only when 2026 form is unavailable.
+            if l5_avg > proj * 0.95 and len(p_hist) >= 2:
+                hot = True
+                raw = (l5_avg - proj) * 0.45
+                boost = max(-8.0, min(12.0, raw))
 
         if hot and boost != 0.0:
             unique_players.at[idx, "proj_points"] = proj + boost
@@ -1082,18 +1169,17 @@ def get_matchup_stats(match_id: str, player_name: str):
             return {"error": "Match not found"}
         t1 = meta["team1"].replace("Bengaluru", "Bangalore")
         t2 = meta["team2"].replace("Bengaluru", "Bangalore")
-        squad_json_path = os.path.join(os.path.dirname(__file__), "..", "data", "2026_active_squads.json")
         p_team = None
-        if os.path.exists(squad_json_path):
-            import json
-            with open(squad_json_path, "r") as f:
-                squads = json.load(f)
-            for roster_name in squads.get(t1, []):
+        squads = merged_team_rosters if merged_team_rosters else {}
+        if squads:
+            k1 = resolve_franchise_squad_key(t1, squads)
+            k2 = resolve_franchise_squad_key(t2, squads)
+            for roster_name in squads.get(k1, []) if k1 else []:
                 if player_names_match(player_name, roster_name):
                     p_team = t1
                     break
             if p_team is None:
-                for roster_name in squads.get(t2, []):
+                for roster_name in squads.get(k2, []) if k2 else []:
                     if player_names_match(player_name, roster_name):
                         p_team = t2
                         break
@@ -1102,17 +1188,15 @@ def get_matchup_stats(match_id: str, player_name: str):
 
     p_opponent = t2 if p_team == t1 else t1
 
-    # 2. Get history ONLY against this specific franchise across all seasons (full historical df)
-    h2h_data = df[
-        (df["player_name"] == p_name_hist)
-        & (df["opponent"].apply(lambda o: _opponent_names_equivalent(o, p_opponent)))
-    ]
-    
-    total_runs = h2h_data['runs_scored'].sum()
-    total_balls = h2h_data['balls_faced'].sum()
+    # 2. Get pre-aggregated history only against tonight's franchise.
+    normalized_opponent = _normalize_team_name_for_lookup(p_opponent)
+    h2h_totals = h2h_lookup.get((str(p_name_hist), normalized_opponent), {})
+    matches_played = int(h2h_totals.get("matches_played", 0))
+    total_runs = int(h2h_totals.get("total_runs", 0))
+    total_balls = int(h2h_totals.get("total_balls", 0))
     sr = (total_runs / total_balls * 100) if total_balls > 0 else 0
-    total_wickets = h2h_data['wickets'].sum()
-    avg_fantasy = h2h_data['proj_points'].mean() if len(h2h_data) > 0 else 0
+    total_wickets = int(h2h_totals.get("total_wickets", 0))
+    avg_fantasy = float(h2h_totals.get("avg_fantasy_points", 0.0))
     
     # Micro Matchups (Batter vs Bowler) — legacy ball-by-ball file; names align with historical dataset
     micro = []
@@ -1143,7 +1227,7 @@ def get_matchup_stats(match_id: str, player_name: str):
     
     return {
         "opponent": str(p_opponent),
-        "matches_played": len(h2h_data),
+        "matches_played": matches_played,
         "total_runs": int(total_runs),
         "strike_rate": round(sr, 2),
         "total_wickets": int(total_wickets),
