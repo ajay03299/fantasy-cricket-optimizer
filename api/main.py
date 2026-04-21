@@ -229,6 +229,11 @@ def append_roster_only_players(
     if not t1_players and not t2_players:
         return unique_players
 
+    def round_credit_to_half(credit):
+        """Round credit to nearest 0.5 increment: 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5"""
+        rounded = round(credit * 2) / 2
+        return max(7, min(10.5, rounded))
+
     next_id = int(base_df["id"].max()) + 1 if "id" in base_df.columns else 0
     add_rows = []
     for team, roster in ((t1, t1_players), (t2, t2_players)):
@@ -261,7 +266,7 @@ def append_roster_only_players(
             nr["modern_team"] = team
             nr["proj_points"] = max(
                 17.0, min(36.0, float(nr.get("proj_points", 22.0)) * 0.82))
-            nr["credits"] = max(7.5, min(9.5, float(nr.get("credits", 8.0)) * 0.95))
+            nr["credits"] = round_credit_to_half(float(nr.get("credits", 8.0)) * 0.95)
             nr["Role"] = "AR"
             nr["id"] = next_id
             next_id += 1
@@ -428,18 +433,26 @@ def load_data():
         p30 = career_scores.quantile(0.30)
         p15 = career_scores.quantile(0.15)
         
+        def round_credit(credit):
+            """Round credit to nearest 0.5 increment between 7 and 10.5"""
+            rounded = round(credit * 2) / 2  # Round to nearest 0.5
+            return max(7, min(10.5, rounded))
+        
         def assign_dream11_credit_historic(p_name):
             score = career_scores.get(p_name, 0)
-            if score >= p98: return 10.5
-            elif score >= p94: return 10.0
-            elif score >= p85: return 9.5
-            elif score >= p70: return 9.0
-            elif score >= p50: return 8.5
-            elif score >= p30: return 8.0
-            elif score >= p15: return 7.5
-            else: return 7.0
+            if score >= p98: return round_credit(10.5)
+            elif score >= p94: return round_credit(10.0)
+            elif score >= p85: return round_credit(9.5)
+            elif score >= p70: return round_credit(9.0)
+            elif score >= p50: return round_credit(8.5)
+            elif score >= p30: return round_credit(8.0)
+            elif score >= p15: return round_credit(7.5)
+            else: return round_credit(7.0)
 
         df['credits'] = df['player_name'].apply(assign_dream11_credit_historic)
+        
+        # Round credits to nearest 0.5 increment: 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5
+        df['credits'] = df['credits'].apply(lambda x: max(7, min(10.5, round(x * 2) / 2)))
         
     # 3. Create persistent ID
     if 'id' not in df.columns:
@@ -638,9 +651,20 @@ def get_squad_data(match_id: str):
         return int(len(sub))
 
     def is_expected_or_active_player(player_name: str, franchise: str) -> bool:
-        # Check if player has appeared in IPL 2026
+        # First check if player has appeared in IPL 2026
         if count_ipl26_appearances(player_name, franchise) >= 1:
             return True
+        # Check if player is in expected XI
+        if ipl2026_xi_by_team and fixture_mno is not None:
+            expected = expected_xi_for_franchise(ipl2026_xi_by_team, franchise, int(fixture_mno))
+            if any(player_names_match(player_name, x) for x in expected):
+                return True
+        # Check if player is in modern squad (active squad list)
+        if modern_squads:
+            k = resolve_franchise_squad_key(franchise, modern_squads)
+            if k and modern_squads.get(k):
+                if any(player_names_match(player_name, squad_player) for squad_player in modern_squads[k]):
+                    return True
         return False
 
     squad_json_path = os.path.join(os.path.dirname(__file__), "..", "data", "2026_active_squads.json")
@@ -650,47 +674,45 @@ def get_squad_data(match_id: str):
         with open(squad_json_path, "r", encoding="utf-8") as f:
             modern_squads = json.load(f)
 
-    # Use expected XI if available, else modern_squads
-    if ipl2026_xi_by_team:
-        expected_t1 = expected_xi_for_franchise(ipl2026_xi_by_team, t1, fixture_mno or 1)
-        expected_t2 = expected_xi_for_franchise(ipl2026_xi_by_team, t2, fixture_mno or 1)
-        t1_players = list(expected_t1) if expected_t1 else (modern_squads.get(resolve_franchise_squad_key(t1, modern_squads), []) if modern_squads else [])
-        t2_players = list(expected_t2) if expected_t2 else (modern_squads.get(resolve_franchise_squad_key(t2, modern_squads), []) if modern_squads else [])
-    else:
-        if modern_squads:
-            k1 = resolve_franchise_squad_key(t1, modern_squads)
-            k2 = resolve_franchise_squad_key(t2, modern_squads)
-            t1_players = modern_squads.get(k1, []) if k1 else []
-            t2_players = modern_squads.get(k2, []) if k2 else []
-        else:
-            t1_players = []
-            t2_players = []
+    if modern_squads:
+        k1 = resolve_franchise_squad_key(t1, modern_squads)
+        k2 = resolve_franchise_squad_key(t2, modern_squads)
+        t1_players = modern_squads.get(k1, []) if k1 else []
+        t2_players = modern_squads.get(k2, []) if k2 else []
         
-    unique_players = df.sort_values('match_date').drop_duplicates(subset=['player_name'], keep='last').copy()
+        unique_players = df.sort_values('match_date').drop_duplicates(subset=['player_name'], keep='last').copy()
 
-    def determine_modern_team(p_name):
-        for m in t1_players:
-            if player_names_match(p_name, m):
-                return t1
-        for m in t2_players:
-            if player_names_match(p_name, m):
-                return t2
-        return None
+        def determine_modern_team(p_name):
+            for m in t1_players:
+                if player_names_match(p_name, m):
+                    return t1
+            for m in t2_players:
+                if player_names_match(p_name, m):
+                    return t2
+            return None
+            
+        unique_players['modern_team'] = unique_players['player_name'].apply(determine_modern_team)
+        unique_players = unique_players[unique_players['modern_team'].notna()].copy()
         
-    unique_players['modern_team'] = unique_players['player_name'].apply(determine_modern_team)
-    unique_players = unique_players[unique_players['modern_team'].notna()].copy()
-    
-    active_flags = []
-    for p in unique_players["player_name"]:
-        is_withdrawn = any(player_names_match(p, w) for w in WITHDRAWAL_2026)
-        active_flags.append(not is_withdrawn)
+        active_flags = []
+        for p in unique_players["player_name"]:
+            is_withdrawn = any(player_names_match(p, w) for w in WITHDRAWAL_2026)
+            active_flags.append(not is_withdrawn)
+            
+        unique_players = unique_players[active_flags].copy()
         
-    unique_players = unique_players[active_flags].copy()
-    
-    unique_players["team"] = unique_players["modern_team"]  # Teleport injection
-    unique_players = append_roster_only_players(
-        unique_players, t1, t2, t1_players, t2_players, df
-    )
+        unique_players["team"] = unique_players["modern_team"]  # Teleport injection
+        unique_players = append_roster_only_players(
+            unique_players, t1, t2, t1_players, t2_players, df
+        )
+
+    else:
+        squad_data = df[(df['season'] == season) & (df['team'].isin([t1, t2]))]
+        if squad_data.empty:
+            squad_data = df[df['team'].isin([t1, t2])]
+            
+        unique_players = squad_data.sort_values('match_date').drop_duplicates(subset=['player_name'], keep='last').copy()
+        unique_players = unique_players[unique_players['team'].isin([t1, t2])]
 
     if not unique_players.empty:
         unique_players['is_probably_playing'] = unique_players.apply(
